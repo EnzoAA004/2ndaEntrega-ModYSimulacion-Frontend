@@ -9,6 +9,7 @@ export interface Measurement {
   population_served?: number;
   flow_rate_m3_day?: number;
   viral_concentration_gc_l?: number;
+  moving_average_7d?: number | null;
   temperature_c?: number;
   rainfall_mm?: number;
   clinical_cases?: number;
