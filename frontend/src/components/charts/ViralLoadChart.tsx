@@ -26,10 +26,12 @@ export function ViralLoadChart({ data, highThreshold = 100000, criticalThreshold
           <YAxis yAxisId="right" orientation="right" tickFormatter={(value) => formatNumber(Number(value), 0)} />
           <Tooltip
             labelFormatter={formatDate}
-            formatter={(value: number, name: string) => {
-              if (name.includes("Lluvia")) return [`${formatNumber(value, 1)} mm`, name];
-              if (name.includes("Casos")) return [formatNumber(value, 0), name];
-              return [formatScientific(value), name];
+            formatter={(value, name) => {
+              const numericValue = Number(value);
+              const label = String(name);
+              if (label.includes("Lluvia")) return [`${formatNumber(numericValue, 1)} mm`, label];
+              if (label.includes("Casos")) return [formatNumber(numericValue, 0), label];
+              return [formatScientific(numericValue), label];
             }}
           />
           <Legend />
