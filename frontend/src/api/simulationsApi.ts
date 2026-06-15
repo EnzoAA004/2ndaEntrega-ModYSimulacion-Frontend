@@ -16,6 +16,16 @@ export async function runNonHomogeneousEvent(payload: unknown) {
   return data;
 }
 
+export async function runScenarioCompare(payload: unknown) {
+  const { data } = await apiClient.post<SimulationResult>("/simulations/scenario-compare", payload);
+  return data;
+}
+
+export async function runCalibration(payload: unknown) {
+  const { data } = await apiClient.post("/simulations/calibrate", payload);
+  return data;
+}
+
 export async function runBifurcation(payload: unknown) {
   const { data } = await apiClient.post<SimulationResult>("/simulations/bifurcation", payload);
   return data;
