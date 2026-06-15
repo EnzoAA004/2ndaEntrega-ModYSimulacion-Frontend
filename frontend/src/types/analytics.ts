@@ -49,3 +49,49 @@ export interface LocationAnalytics {
     critical?: number;
   };
 }
+
+export interface ForecastPoint {
+  sample_date: string;
+  predicted_viral_concentration_gc_l?: number;
+  viral_concentration_gc_l?: number;
+  lower_bound?: number;
+  upper_bound?: number;
+  risk_level?: RiskLevel | string;
+  clinical_cases?: number | null;
+  rainfall_mm?: number | null;
+}
+
+export interface ForecastScenario {
+  name: string;
+  series: ForecastPoint[];
+}
+
+export interface ForecastSummary {
+  status?: string;
+  trend?: string;
+  growth_rate_log_per_day?: number;
+  doubling_time_days?: number | null;
+  projected_change_percent?: number | null;
+  max_predicted_viral_concentration_gc_l?: number | null;
+  final_predicted_viral_concentration_gc_l?: number | null;
+  forecast_risk_level?: RiskLevel | string;
+  high_threshold_crossing_date?: string | null;
+  critical_threshold_crossing_date?: string | null;
+  confidence_band_log_std?: number;
+  recommendation?: string;
+  message?: string;
+}
+
+export interface LocationForecast {
+  location_name: string;
+  horizon_days: number;
+  window_days: number;
+  history: ForecastPoint[];
+  forecast: ForecastPoint[];
+  scenarios: ForecastScenario[];
+  summary: ForecastSummary;
+  thresholds?: {
+    high?: number;
+    critical?: number;
+  };
+}
