@@ -19,6 +19,26 @@ export const apiClient = axios.create({
   timeout: 60000,
 });
 
+function formatApiDetail(detail: unknown): string | undefined {
+  if (!detail) return undefined;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object") {
+          const row = item as { loc?: unknown[]; msg?: string; type?: string };
+          const path = Array.isArray(row.loc) ? row.loc.join(".") : "campo";
+          return `${path}: ${row.msg ?? row.type ?? JSON.stringify(item)}`;
+        }
+        return String(item);
+      })
+      .join(" | ");
+  }
+  if (typeof detail === "object") return JSON.stringify(detail);
+  return String(detail);
+}
+
 export function getApiErrorMessage(error: unknown): string {
   if (!axios.isAxiosError(error)) return "Ocurrio un error inesperado.";
   const axiosError = error as AxiosError<ApiErrorPayload>;
@@ -27,5 +47,6 @@ export function getApiErrorMessage(error: unknown): string {
   if (axiosError.response.status === 404) {
     return "No se encontro el endpoint solicitado en el backend. Verifica que VITE_API_URL termine en /api y que la ruta exista.";
   }
-  return axiosError.response.data?.detail ?? axiosError.response.data?.message ?? `Error ${axiosError.response.status}`;
+  const payload = axiosError.response.data;
+  return formatApiDetail(payload?.detail) ?? formatApiDetail(payload?.message) ?? `Error ${axiosError.response.status}`;
 }
