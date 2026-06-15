@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, CalendarClock, Database, ShieldCheck, Siren, TrendingUp } from "lucide-react";
+import { Activity, CalendarClock, Database, FileText, ShieldCheck, Siren, TrendingUp } from "lucide-react";
 import { getLocationAnalytics, getLocationForecast, getOverview, getRiskTable } from "../api/analyticsApi";
-import { getApiErrorMessage } from "../api/client";
+import { apiBaseUrl, apiClient, getApiErrorMessage } from "../api/client";
 import { getLatestMeasurements, getLocations } from "../api/measurementsApi";
 import { ForecastChart } from "../components/charts/ForecastChart";
 import { ViralLoadChart } from "../components/charts/ViralLoadChart";
 import { EarlyWarningPanel } from "../components/dashboard/EarlyWarningPanel";
 import { LatestMeasurementsTable } from "../components/dashboard/LatestMeasurementsTable";
 import { LocationSelector } from "../components/dashboard/LocationSelector";
+import { PredictionRankingPanel } from "../components/dashboard/PredictionRankingPanel";
 import { RiskTable } from "../components/dashboard/RiskTable";
 import { SummaryCards } from "../components/dashboard/SummaryCards";
 import { PageHeader } from "../components/layout/PageHeader";
@@ -25,6 +26,7 @@ export function DashboardPage() {
   const [riskRows, setRiskRows] = useState<RiskResult[]>([]);
   const [latest, setLatest] = useState<Measurement[]>([]);
   const [locations, setLocations] = useState<LocationSummary[]>([]);
+  const [predictiveRows, setPredictiveRows] = useState<any[]>([]);
   const [selected, setSelected] = useState("");
   const [locationData, setLocationData] = useState<LocationAnalytics>();
   const [forecast, setForecast] = useState<LocationForecast>();
@@ -36,11 +38,12 @@ export function DashboardPage() {
     async function load() {
       setLoading(true);
       setError("");
-      const [overviewResult, riskResult, latestResult, locationsResult] = await Promise.allSettled([
+      const [overviewResult, riskResult, latestResult, locationsResult, predictiveResult] = await Promise.allSettled([
         getOverview(),
         getRiskTable(),
         getLatestMeasurements(),
         getLocations(),
+        apiClient.get("/analytics/predictive-ranking", { params: { horizon: 21, window: 45 } }),
       ]);
 
       const errors: string[] = [];
@@ -55,6 +58,8 @@ export function DashboardPage() {
 
       if (locationsResult.status === "fulfilled") setLocations(locationsResult.value);
       else errors.push(getApiErrorMessage(locationsResult.reason));
+
+      if (predictiveResult.status === "fulfilled") setPredictiveRows(predictiveResult.value.data ?? []);
 
       const loadedLocations = locationsResult.status === "fulfilled" ? locationsResult.value : [];
       const loadedRisk = riskResult.status === "fulfilled" ? riskResult.value : [];
@@ -99,6 +104,10 @@ export function DashboardPage() {
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
                   {overview?.status_message ?? "Carga datos demo o mediciones reales para activar el monitoreo epidemiológico ambiental."}
                 </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <a className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800" href={apiBaseUrl + "/analytics/report/html"} target="_blank" rel="noreferrer"><FileText className="h-4 w-4" /> Reporte imprimible</a>
+                  <a className="inline-flex items-center gap-2 rounded-md bg-white px-4 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50" href={apiBaseUrl + "/analytics/export/measurements.csv"} target="_blank" rel="noreferrer">Exportar CSV</a>
+                </div>
               </div>
               <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px]">
                 <div className="rounded-xl bg-white/80 p-4 ring-1 ring-slate-200">
@@ -156,45 +165,36 @@ export function DashboardPage() {
               {forecastSummary?.status === "ok" ? (
                 <div className="space-y-4 text-sm text-slate-600">
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <p className="text-xs font-semibold uppercase text-slate-500">Riesgo proyectado</p>
-                      <p className="mt-1 text-lg font-bold text-slate-950">{forecastSummary.forecast_risk_level ?? "-"}</p>
-                    </div>
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <p className="text-xs font-semibold uppercase text-slate-500">Cambio esperado</p>
-                      <p className="mt-1 text-lg font-bold text-slate-950">{formatPercentTrend(forecastSummary.projected_change_percent)}</p>
-                    </div>
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <p className="text-xs font-semibold uppercase text-slate-500">Máximo predicho</p>
-                      <p className="mt-1 text-lg font-bold text-slate-950">{formatScientific(forecastSummary.max_predicted_viral_concentration_gc_l)}</p>
-                    </div>
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <p className="text-xs font-semibold uppercase text-slate-500">Duplicación</p>
-                      <p className="mt-1 text-lg font-bold text-slate-950">{forecastSummary.doubling_time_days ? `${formatNumber(forecastSummary.doubling_time_days, 1)} días` : "No aplica"}</p>
-                    </div>
+                    <div className="rounded-xl bg-slate-50 p-3"><p className="text-xs font-semibold uppercase text-slate-500">Riesgo proyectado</p><p className="mt-1 text-lg font-bold text-slate-950">{forecastSummary.forecast_risk_level ?? "-"}</p></div>
+                    <div className="rounded-xl bg-slate-50 p-3"><p className="text-xs font-semibold uppercase text-slate-500">Cambio esperado</p><p className="mt-1 text-lg font-bold text-slate-950">{formatPercentTrend(forecastSummary.projected_change_percent)}</p></div>
+                    <div className="rounded-xl bg-slate-50 p-3"><p className="text-xs font-semibold uppercase text-slate-500">Máximo predicho</p><p className="mt-1 text-lg font-bold text-slate-950">{formatScientific(forecastSummary.max_predicted_viral_concentration_gc_l)}</p></div>
+                    <div className="rounded-xl bg-slate-50 p-3"><p className="text-xs font-semibold uppercase text-slate-500">Duplicación</p><p className="mt-1 text-lg font-bold text-slate-950">{forecastSummary.doubling_time_days ? `${formatNumber(forecastSummary.doubling_time_days, 1)} días` : "No aplica"}</p></div>
                   </div>
-                  <div className="rounded-xl border border-sentinel-100 bg-sentinel-50 p-4">
-                    <div className="mb-2 flex items-center gap-2 font-semibold text-slate-900"><Activity className="h-4 w-4 text-sentinel-700" /> Recomendación automática</div>
-                    <p>{forecastSummary.recommendation}</p>
-                  </div>
-                  <div className="text-xs leading-5 text-slate-500">
-                    <p>Umbral alto: {forecastSummary.high_threshold_crossing_date ? formatDate(forecastSummary.high_threshold_crossing_date) : "no cruza en el horizonte"}.</p>
-                    <p>Umbral crítico: {forecastSummary.critical_threshold_crossing_date ? formatDate(forecastSummary.critical_threshold_crossing_date) : "no cruza en el horizonte"}.</p>
-                  </div>
+                  <div className="rounded-xl border border-sentinel-100 bg-sentinel-50 p-4"><div className="mb-2 flex items-center gap-2 font-semibold text-slate-900"><Activity className="h-4 w-4 text-sentinel-700" /> Recomendación automática</div><p>{forecastSummary.recommendation}</p></div>
+                  <div className="text-xs leading-5 text-slate-500"><p>Umbral alto: {forecastSummary.high_threshold_crossing_date ? formatDate(forecastSummary.high_threshold_crossing_date) : "no cruza en el horizonte"}.</p><p>Umbral crítico: {forecastSummary.critical_threshold_crossing_date ? formatDate(forecastSummary.critical_threshold_crossing_date) : "no cruza en el horizonte"}.</p></div>
                 </div>
               ) : <EmptyState title="Predicción no disponible" message={forecastSummary?.message ?? "Carga más datos para habilitar la predicción."} />}
             </Card>
           </div>
 
+          <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
+            <Card>
+              <CardTitle>Ranking predictivo por ubicación</CardTitle>
+              <p className="mb-4 mt-1 text-sm text-slate-500">Ordena las plantas por riesgo proyectado, score predictivo y velocidad de crecimiento.</p>
+              {predictiveRows.length ? <PredictionRankingPanel rows={predictiveRows} /> : <EmptyState title="Sin ranking predictivo" />}
+            </Card>
+            <Card>
+              <CardTitle>Plano operativo de vigilancia</CardTitle>
+              <p className="mt-1 text-sm leading-6 text-slate-600">Vista resumida para defensa: combina riesgo actual, predicción a 21 días y acciones preventivas. Para una versión con mapa geográfico real se puede integrar Leaflet si luego se cargan coordenadas reales.</p>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {predictiveRows.slice(0, 4).map((row) => <div key={row.location_name} className="rounded-xl border border-slate-200 bg-slate-50 p-4"><div className="flex items-center justify-between gap-2"><p className="font-semibold text-slate-900">{row.location_name}</p><Badge risk={row.forecast_risk_level} /></div><p className="mt-2 text-sm text-slate-600">{row.recommendation}</p></div>)}
+              </div>
+            </Card>
+          </div>
+
           <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
             <Card>
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <CardTitle>Ranking de riesgo por ubicacion</CardTitle>
-                  <p className="mt-1 text-sm text-slate-500">Ordenado por score de riesgo, tendencia y alerta temprana.</p>
-                </div>
-                <ShieldCheck className="h-5 w-5 text-sentinel-600" />
-              </div>
+              <div className="mb-4 flex items-center justify-between gap-3"><div><CardTitle>Ranking de riesgo por ubicacion</CardTitle><p className="mt-1 text-sm text-slate-500">Ordenado por score de riesgo, tendencia y alerta temprana.</p></div><ShieldCheck className="h-5 w-5 text-sentinel-600" /></div>
               <div className="mt-4">{riskRows.length ? <RiskTable rows={riskRows} /> : <EmptyState />}</div>
             </Card>
             <Card>
