@@ -8,7 +8,7 @@ export function normalizeApiBaseUrl(baseUrl: string | undefined): string {
   return normalizedBaseUrl.endsWith("/api") ? normalizedBaseUrl : `${normalizedBaseUrl}/api`;
 }
 
-const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL);
+export const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL);
 
 if (import.meta.env.DEV) {
   console.info("[api] baseURL:", apiBaseUrl);
@@ -16,13 +16,13 @@ if (import.meta.env.DEV) {
 
 export const apiClient = axios.create({
   baseURL: apiBaseUrl,
-  timeout: 12000,
+  timeout: 60000,
 });
 
 export function getApiErrorMessage(error: unknown): string {
   if (!axios.isAxiosError(error)) return "Ocurrio un error inesperado.";
   const axiosError = error as AxiosError<ApiErrorPayload>;
-  if (axiosError.code === "ECONNABORTED") return "El backend tardo demasiado en responder.";
+  if (axiosError.code === "ECONNABORTED") return "El backend tardo demasiado en responder. Puede estar iniciando en Render o procesando una simulacion pesada.";
   if (!axiosError.response) return "No se pudo conectar con el backend. Verifica que FastAPI este corriendo.";
   if (axiosError.response.status === 404) {
     return "No se encontro el endpoint solicitado en el backend. Verifica que VITE_API_URL termine en /api y que la ruta exista.";
