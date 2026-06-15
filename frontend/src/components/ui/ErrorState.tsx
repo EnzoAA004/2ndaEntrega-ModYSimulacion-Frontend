@@ -1,6 +1,6 @@
 import { AlertTriangle } from "lucide-react";
 
-function toMessage(message: unknown) {
+function toMessage(message: unknown): string {
   if (message === undefined || message === null) return "Ocurrio un error inesperado.";
   if (typeof message === "string") return message;
   if (Array.isArray(message)) return message.map(toMessage).join(" | ");
