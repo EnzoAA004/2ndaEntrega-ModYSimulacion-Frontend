@@ -48,6 +48,8 @@ export function SimulationResultPanel({ result, kind = "time" }: Props) {
         {kind === "bifurcation" ? <BifurcationChart result={result} /> : kind === "phase" ? <PhaseDiagramChart result={result} /> : <SimulationTimeSeriesChart result={result} />}
       </Card>
 
+      <QualitativeGraphGuide kind={kind} stability={stability} result={result} />
+
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500">Equilibrios</p>
@@ -81,6 +83,35 @@ export function SimulationResultPanel({ result, kind = "time" }: Props) {
         </Card>
       )}
     </div>
+  );
+}
+
+function QualitativeGraphGuide({ kind, stability, result }: { kind: "time" | "bifurcation" | "phase"; stability?: string; result: SimulationResult }) {
+  const cards = kind === "phase" ? [
+    ["Campo vectorial", "Las flechas indican hacia dónde evoluciona el sistema desde cada estado inicial."],
+    ["Nulclinas", "Sobre una nulclina una variable tiene derivada nula; sus cortes ubican equilibrios."],
+    ["Estabilidad", stability ? `Clasificación local: ${stability}.` : "Se interpreta con autovalores y dirección del flujo."],
+  ] : kind === "bifurcation" ? [
+    ["Parámetro crítico", "La línea de umbral marca el valor donde cambia la cantidad o estabilidad de equilibrios."],
+    ["Ramas", "Azul representa estabilidad; rojo representa inestabilidad o pérdida de estabilidad."],
+    ["Aplicación", "Permite leer cuándo un aumento de beta, gamma u otro parámetro activa un régimen de brote."],
+  ] : [
+    ["Evolución temporal", "Permite ver convergencia, crecimiento, amortiguamiento, saturación u oscilaciones."],
+    ["Máximos", "Las líneas verticales señalan el máximo de infectados o carga viral cuando el backend lo calcula."],
+    ["Comparación numérica", result.method_comparison?.rows?.length ? "Euler, Heun y RK4 se comparan para analizar precisión y estabilidad numérica." : "Se puede comparar con otros métodos o escenarios si el modelo lo habilita."],
+  ];
+  return (
+    <Card className="border-sentinel-100 bg-gradient-to-r from-sentinel-50 to-white">
+      <CardTitle>Lectura cualitativa del gráfico</CardTitle>
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        {cards.map(([title, body]) => (
+          <div key={title} className="rounded-xl bg-white/80 p-4 ring-1 ring-slate-200">
+            <p className="text-sm font-semibold text-slate-900">{title}</p>
+            <p className="mt-1 text-sm leading-6 text-slate-600">{body}</p>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 
