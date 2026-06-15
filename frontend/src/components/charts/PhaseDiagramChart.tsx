@@ -3,6 +3,17 @@ import { SimulationResult } from "../../types/simulation";
 import { getEquilibriumPoints, getPhaseData } from "../../utils/chartUtils";
 import { formatNumber, formatScientific } from "../../utils/formatters";
 
+type PhasePoint = {
+  I: number;
+  V: number;
+  dI?: number;
+  dV?: number;
+  magnitude?: number;
+  classification?: string;
+  trajectoryIndex?: number;
+  [key: string]: number | string | undefined;
+};
+
 function VectorArrow(props: any) {
   const { cx, cy, payload } = props;
   if (cx === undefined || cy === undefined || !payload) return null;
@@ -45,13 +56,13 @@ function InvisiblePoint() {
   return null;
 }
 
-function pointInDomain(point: Record<string, number>, domain: { iMin: number; iMax: number; vMin: number; vMax: number }) {
+function pointInDomain(point: PhasePoint, domain: { iMin: number; iMax: number; vMin: number; vMax: number }) {
   const I = Number(point.I);
   const V = Number(point.V);
   return Number.isFinite(I) && Number.isFinite(V) && I >= domain.iMin && I <= domain.iMax && V >= domain.vMin && V <= domain.vMax;
 }
 
-function getDomain(data: Array<Record<string, number>>) {
+function getDomain(data: PhasePoint[]) {
   const iValues = data.map((item) => Number(item.I)).filter(Number.isFinite);
   const vValues = data.map((item) => Number(item.V)).filter(Number.isFinite);
   const iMin = Math.min(...iValues, 0);
@@ -62,7 +73,7 @@ function getDomain(data: Array<Record<string, number>>) {
 }
 
 function buildTrajectories(result?: SimulationResult) {
-  const data = getPhaseData(result) as Array<Record<string, number>>;
+  const data = getPhaseData(result) as unknown as PhasePoint[];
   const p = result?.parameters ?? {};
   const beta = Number(p.beta ?? 0.35);
   const K = Number(p.K ?? 100000);
@@ -82,7 +93,7 @@ function buildTrajectories(result?: SimulationResult) {
   return seeds.map((seed, trajectoryIndex) => {
     let I = seed[0];
     let V = seed[1];
-    const path: Array<Record<string, number>> = [];
+    const path: PhasePoint[] = [];
     const dt = 0.08;
     for (let step = 0; step < 160; step += 1) {
       path.push({ I, V, trajectoryIndex });
@@ -96,11 +107,11 @@ function buildTrajectories(result?: SimulationResult) {
 }
 
 export function PhaseDiagramChart({ result }: { result?: SimulationResult }) {
-  const data = getPhaseData(result) as Array<Record<string, number>>;
+  const data = getPhaseData(result) as unknown as PhasePoint[];
   const domain = getDomain(data);
-  const allEquilibria = getEquilibriumPoints(result) as Array<Record<string, number>>;
-  const rawDVNullcline = (result?.nullcline_points?.dV_dt ?? []) as Array<Record<string, number>>;
-  const rawDINullcline = (result?.nullcline_points?.dI_dt ?? []) as Array<Record<string, number>>;
+  const allEquilibria = getEquilibriumPoints(result) as unknown as PhasePoint[];
+  const rawDVNullcline = (result?.nullcline_points?.dV_dt ?? []) as unknown as PhasePoint[];
+  const rawDINullcline = (result?.nullcline_points?.dI_dt ?? []) as unknown as PhasePoint[];
   const dVNullcline = rawDVNullcline.filter((point) => pointInDomain(point, domain));
   const dINullcline = rawDINullcline.filter((point) => pointInDomain(point, domain));
   const equilibria = allEquilibria.filter((point) => pointInDomain(point, domain));
