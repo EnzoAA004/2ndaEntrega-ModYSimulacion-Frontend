@@ -229,6 +229,11 @@ function AgentSystem() {
       if (posAttr) posAttr.needsUpdate = true;
     }
 
+    // Auto-pause when epidemic ends (no more infected)
+    if (counts.I === 0 && tickRef.current > 30) {
+      store.pause();
+    }
+
     // Sync React state every 10 frames
     if (frameRef.current % 10 === 0) {
       store.updateCounts(counts, tickRef.current);
