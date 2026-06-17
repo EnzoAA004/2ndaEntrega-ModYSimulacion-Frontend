@@ -1,7 +1,8 @@
 export const WORLD_SIZE = 60;
 export const MAX_POP = 800;
-// 1 game-day = 90 ticks → at 60fps with simSpeed=1 that's 1.5 real seconds per day
-export const TICKS_PER_DAY = 90;
+// With tick accumulator: simSpeed=1 → 60 steps/s, simSpeed=0.4 → 24 steps/s
+// 1 game-day = 120 ticks → at simSpeed=0.5 that's 120/30fps = 4 real seconds per day
+export const TICKS_PER_DAY = 120;
 
 export type AgentState = 'S' | 'I' | 'R' | 'V';
 
@@ -98,8 +99,8 @@ export function createAgents(population: number, vacRate: number, baseContagion:
 const CELL = 5;
 const GW = Math.ceil(WORLD_SIZE / CELL);
 
-export function stepAgents(agents: Agent[], tick: number, params: SimParams, dt: number): StepResult {
-  const BASE_SPEED = 0.13;
+export function stepAgents(agents: Agent[], tick: number, params: SimParams): StepResult {
+  const BASE_SPEED = 0.055; // slower agents
 
   // Mutation: contagion slowly drifts up
   if (params.mutationRate > 0 && tick > 0 && tick % 10 === 0) {
@@ -115,8 +116,9 @@ export function stepAgents(agents: Agent[], tick: number, params: SimParams, dt:
   // Quarantine: drastically reduces mobility
   const mobilityMultiplier = 1 - params.quarantine * 0.85;
 
-  // ~0.4% infection chance per tick per contact at default params — gives R₀≈2 at contagion=0.55
-  const effectiveBeta = _currentContagion * (1 - params.maskUsage * 0.65) * tempFactor * dt * 0.35;
+  // Fixed probability per tick (not per second) — simSpeed controls how many ticks advance per frame
+  // 0.003 base gives R₀≈2.5 for contagion=0.55, recovery=14d, TICKS_PER_DAY=90
+  const effectiveBeta = _currentContagion * (1 - params.maskUsage * 0.65) * tempFactor * 0.003;
   const infectRadius = 2.0 * (1 - params.distancing * 0.6);
 
   // Spatial grid

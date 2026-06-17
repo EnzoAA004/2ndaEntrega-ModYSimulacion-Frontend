@@ -51,7 +51,7 @@ export const useEpidemicStore = create<EpidemicStore>((set, get) => ({
   history: [],
   resetSignal: 0,
   eventSignal: null,
-  simSpeed: 1.0,
+  simSpeed: 0.5,
 
   setParam: (key, value) => {
     set((s) => ({ params: { ...s.params, [key]: value } }));

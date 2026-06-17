@@ -338,6 +338,7 @@ function AgentSystem() {
   const agentsRef = useRef<Agent[]>([]);
   const tickRef = useRef(0);
   const frameRef = useRef(0);
+  const tickAccRef = useRef(0); // fractional tick accumulator for smooth simSpeed
 
   const wavesRef = useRef<WaveEntry[]>(
     Array.from({ length: WAVE_POOL }, () => ({ active: false, life: 0, x: 0, z: 0 })),
@@ -362,6 +363,7 @@ function AgentSystem() {
     agentsRef.current = createAgents(params.population, params.vacRate, params.contagion);
     tickRef.current = 0;
     frameRef.current = 0;
+    tickAccRef.current = 0;
     wavesRef.current.forEach((w) => { w.active = false; });
     flashRef.current.forEach((f) => { f.active = false; });
   }, [resetSignal]);
@@ -398,11 +400,20 @@ function AgentSystem() {
       return;
     }
 
-    const dt = Math.min(delta * store.simSpeed, 0.08);
-    const { counts, transmissions } = stepAgents(
-      agentsRef.current, tickRef.current, store.params, dt,
-    );
-    tickRef.current++;
+    // Accumulate fractional ticks — simSpeed=0.4 means ~24 steps/s at 60fps
+    tickAccRef.current += store.simSpeed;
+    const stepsThisFrame = Math.floor(tickAccRef.current);
+    tickAccRef.current -= stepsThisFrame;
+
+    // Run 0 or 1 simulation steps (cap at 1 to avoid spiral-of-death)
+    let counts = store.counts;
+    let transmissions: Array<[number, number, number, number]> = [];
+    if (stepsThisFrame >= 1) {
+      const result = stepAgents(agentsRef.current, tickRef.current, store.params);
+      counts = result.counts;
+      transmissions = result.transmissions;
+      tickRef.current++;
+    }
     frameRef.current++;
 
     if (counts.I === 0 && tickRef.current > TICKS_PER_DAY) {
@@ -545,16 +556,16 @@ function AgentSystem() {
 
   return (
     <>
-      {/* Agent spheres — small dots */}
+      {/* Agent spheres — clean medium balls like Plague Inc. */}
       <instancedMesh ref={agentMeshRef} args={[undefined, undefined, MAX_POP]}>
-        <sphereGeometry args={[0.38, 10, 8]} />
-        <meshStandardMaterial roughness={0.1} metalness={0.0} emissiveIntensity={3.0} />
+        <sphereGeometry args={[0.52, 14, 10]} />
+        <meshStandardMaterial roughness={0.35} metalness={0.05} />
       </instancedMesh>
 
-      {/* Halo glow (additive) — subtle, tight */}
+      {/* Halo glow — very subtle, only visible with bloom */}
       <instancedMesh ref={haloMeshRef} args={[undefined, undefined, MAX_POP]}>
-        <sphereGeometry args={[0.65, 8, 6]} />
-        <meshBasicMaterial transparent opacity={0.18} depthWrite={false} blending={THREE.AdditiveBlending} />
+        <sphereGeometry args={[0.72, 10, 8]} />
+        <meshBasicMaterial transparent opacity={0.08} depthWrite={false} blending={THREE.AdditiveBlending} />
       </instancedMesh>
 
       {/* Infection radius rings */}
