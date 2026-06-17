@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEpidemicStore } from '../../store/epidemicStore';
-import { computeR0 } from '../../simulation/agentEngine';
+import { computeR0, TICKS_PER_DAY } from '../../simulation/agentEngine';
 
 function AnimatedCount({ value, color }: { value: number; color: string }) {
   const [displayed, setDisplayed] = useState(value);
@@ -56,7 +56,7 @@ export function StatsHUD() {
   const counts = useEpidemicStore((s) => s.counts);
   const tick = useEpidemicStore((s) => s.tick);
   const params = useEpidemicStore((s) => s.params);
-  const day = Math.floor(tick / 30);
+  const day = Math.floor(tick / TICKS_PER_DAY);
   const R0 = computeR0(params);
   const r0Color = R0 > 2 ? '#ef4444' : R0 > 1 ? '#eab308' : '#22c55e';
 

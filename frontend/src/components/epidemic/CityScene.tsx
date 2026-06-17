@@ -5,7 +5,7 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { useEpidemicStore } from '../../store/epidemicStore';
-import { createAgents, stepAgents, WORLD_SIZE, MAX_POP, STATE_COLOR } from '../../simulation/agentEngine';
+import { createAgents, stepAgents, WORLD_SIZE, MAX_POP, STATE_COLOR, TICKS_PER_DAY } from '../../simulation/agentEngine';
 import type { Agent } from '../../simulation/agentEngine';
 
 // ── Heatmap ─────────────────────────────────────────────────────────
@@ -72,34 +72,49 @@ function updateHeatmap(agents: Agent[], texture: THREE.CanvasTexture) {
 
 interface BuildingDef { x: number; z: number; w: number; d: number; h: number; color: string; emissive?: string }
 
+// ── BARRIO NORTE (z: -28 to -12) ─────────────────────────────────────
+// ── CENTRO       (z: -10 to +10) ─────────────────────────────────────
+// ── BARRIO SUR   (z: +12 to +27) ─────────────────────────────────────
 const BUILDINGS: BuildingDef[] = [
-  // Residential
-  { x: -22, z: -22, w: 5, d: 4, h: 4.0, color: '#1e2d4a' },
-  { x: -13, z: -22, w: 4, d: 5, h: 3.0, color: '#162035' },
-  { x:   7, z: -22, w: 3, d: 3, h: 5.5, color: '#1a2840' },
-  { x:  16, z: -22, w: 5, d: 4, h: 3.5, color: '#1e2d4a' },
-  { x:  24, z: -22, w: 4, d: 4, h: 6.5, color: '#162035' },
-  { x: -22, z: -13, w: 4, d: 5, h: 3.5, color: '#1a2840' },
-  { x:  14, z: -13, w: 5, d: 4, h: 4.5, color: '#1e2d4a' },
-  { x:  24, z: -13, w: 3, d: 3, h: 3.0, color: '#162035' },
-  { x: -22, z:   8, w: 4, d: 4, h: 3.0, color: '#1a2840' },
-  { x: -14, z:   8, w: 5, d: 3, h: 5.5, color: '#1e2d4a' },
-  { x:  16, z:   8, w: 4, d: 5, h: 4.0, color: '#162035' },
-  { x:  24, z:   8, w: 3, d: 4, h: 4.5, color: '#1a2840' },
+  // Barrio Norte
+  { x: -22, z: -24, w: 5, d: 4, h: 4.0, color: '#1e2d4a' },
+  { x: -13, z: -24, w: 4, d: 5, h: 3.0, color: '#162035' },
+  { x:  -3, z: -24, w: 3, d: 3, h: 5.5, color: '#1a2840' },
+  { x:   7, z: -24, w: 5, d: 4, h: 3.5, color: '#1e2d4a' },
+  { x:  17, z: -24, w: 4, d: 4, h: 6.5, color: '#162035' },
+  { x:  25, z: -24, w: 3, d: 4, h: 3.5, color: '#1a2840' },
+  { x: -22, z: -16, w: 4, d: 5, h: 3.5, color: '#1a2840' },
+  { x:  -5, z: -16, w: 3, d: 3, h: 5.0, color: '#162035' },
+  { x:   8, z: -16, w: 5, d: 4, h: 4.5, color: '#1e2d4a' },
+  { x:  24, z: -16, w: 3, d: 3, h: 3.0, color: '#162035' },
+  // Escuela (Norte landmark)
+  { x: -10, z: -20, w: 6, d: 5, h: 3.5, color: '#1e2a20', emissive: '#1e2a20' },
+  // Torre Norte
+  { x:  0,  z: -22, w: 4, d: 4, h: 8.5, color: '#12182e' },
+
+  // Centro
+  { x: -20, z:  -5, w: 4, d: 4, h: 3.0, color: '#1a2840' },
+  { x: -20, z:   5, w: 5, d: 3, h: 5.5, color: '#1e2d4a' },
+  { x:  16, z:  -5, w: 4, d: 5, h: 4.0, color: '#162035' },
+  { x:  16, z:   5, w: 3, d: 4, h: 4.5, color: '#1a2840' },
+  // Hospital (Centro landmark)
+  { x: 18,  z: -5, w: 7, d: 6, h: 5.0, color: '#1e3340', emissive: '#1e3340' },
+  // Commercial tower Centro
+  { x: -12, z:  0, w: 4, d: 4, h: 10.0, color: '#101828' },
+  { x:  12, z:  0, w: 3, d: 3, h:  7.0, color: '#12182e' },
+
+  // Barrio Sur
   { x: -22, z:  17, w: 5, d: 4, h: 3.5, color: '#1e2d4a' },
-  { x: -13, z:  17, w: 3, d: 5, h: 2.8, color: '#162035' },
-  { x:   8, z:  17, w: 4, d: 3, h: 5.0, color: '#1a2840' },
-  { x:  24, z:  17, w: 4, d: 4, h: 3.5, color: '#1e2d4a' },
-  { x: -22, z:  24, w: 4, d: 3, h: 5.5, color: '#162035' },
-  { x:   8, z:  24, w: 5, d: 4, h: 3.0, color: '#1a2840' },
-  { x:  17, z:  24, w: 4, d: 4, h: 4.5, color: '#1e2d4a' },
-  { x:  25, z:  24, w: 3, d: 5, h: 7.0, color: '#162035' },
-  // Hospital (landmark)
-  { x: 18, z: -5, w: 7, d: 6, h: 5.0, color: '#1e3340', emissive: '#1e3340' },
-  // School
-  { x: -18, z: 5, w: 6, d: 5, h: 3.5, color: '#1e2a20', emissive: '#1e2a20' },
-  // Commercial tower
-  { x: 0, z: -20, w: 4, d: 4, h: 9.0, color: '#12182e' },
+  { x: -12, z:  17, w: 3, d: 5, h: 2.8, color: '#162035' },
+  { x:  -2, z:  17, w: 4, d: 3, h: 5.0, color: '#1a2840' },
+  { x:   9, z:  17, w: 4, d: 4, h: 3.5, color: '#1e2d4a' },
+  { x:  19, z:  17, w: 3, d: 4, h: 4.5, color: '#162035' },
+  { x: -22, z:  25, w: 4, d: 3, h: 5.5, color: '#162035' },
+  { x:  -8, z:  25, w: 5, d: 4, h: 3.0, color: '#1a2840' },
+  { x:   5, z:  25, w: 4, d: 4, h: 4.5, color: '#1e2d4a' },
+  { x:  18, z:  25, w: 3, d: 5, h: 7.0, color: '#162035' },
+  // Plaza Sur landmark
+  { x: 25,  z: 22,  w: 3, d: 3, h: 4.0, color: '#1a2840' },
 ];
 
 const TREE_POS: Array<[number, number, number]> = [
@@ -150,10 +165,15 @@ function HospitalCross({ x, z }: { x: number; z: number }) {
 function City() {
   const streetGeom = useMemo(() => {
     const pos: number[] = [];
-    for (let c = -30; c <= 30; c += 10) {
+    // Streets within each district
+    for (let c = -30; c <= 30; c += 8) {
       pos.push(c, 0.02, -30, c, 0.02, 30);
       pos.push(-30, 0.02, c, 30, 0.02, c);
     }
+    // Main avenues connecting districts (brighter)
+    pos.push(0, 0.03, -30,  0, 0.03, 30);  // vertical avenue
+    pos.push(-30, 0.03, -11, 30, 0.03, -11); // Norte/Centro boundary
+    pos.push(-30, 0.03,  11, 30, 0.03,  11); // Centro/Sur boundary
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     return g;
@@ -167,21 +187,51 @@ function City() {
         <meshStandardMaterial color="#0d1523" />
       </mesh>
 
+      {/* Barrio Norte subtle tint */}
+      <mesh rotation-x={-Math.PI / 2} position={[0, 0.005, -20]}>
+        <planeGeometry args={[60, 18]} />
+        <meshStandardMaterial color="#0e1428" transparent opacity={0.6} />
+      </mesh>
+
+      {/* Barrio Sur subtle tint */}
+      <mesh rotation-x={-Math.PI / 2} position={[0, 0.005, 20]}>
+        <planeGeometry args={[60, 16]} />
+        <meshStandardMaterial color="#10130e" transparent opacity={0.6} />
+      </mesh>
+
       {/* Central park */}
       <mesh rotation-x={-Math.PI / 2} position={[0, 0.01, 0]}>
-        <planeGeometry args={[16, 16]} />
+        <planeGeometry args={[14, 14]} />
         <meshStandardMaterial color="#1a3520" />
       </mesh>
 
       {/* Park inner grass */}
       <mesh rotation-x={-Math.PI / 2} position={[0, 0.02, 0]}>
-        <planeGeometry args={[12, 12]} />
+        <planeGeometry args={[10, 10]} />
         <meshStandardMaterial color="#1e4025" emissive="#0a2010" emissiveIntensity={0.3} />
+      </mesh>
+
+      {/* Norte park */}
+      <mesh rotation-x={-Math.PI / 2} position={[0, 0.01, -20]}>
+        <planeGeometry args={[8, 6]} />
+        <meshStandardMaterial color="#162a1a" />
+      </mesh>
+
+      {/* Sur plaza */}
+      <mesh rotation-x={-Math.PI / 2} position={[-5, 0.01, 21]}>
+        <planeGeometry args={[10, 6]} />
+        <meshStandardMaterial color="#1a1a10" />
+      </mesh>
+
+      {/* Connecting highway center line */}
+      <mesh rotation-x={-Math.PI / 2} position={[0, 0.025, 0]}>
+        <planeGeometry args={[1.2, 60]} />
+        <meshStandardMaterial color="#1e2d5a" emissive="#2233aa" emissiveIntensity={0.15} />
       </mesh>
 
       {/* Street grid */}
       <lineSegments geometry={streetGeom}>
-        <lineBasicMaterial color="#1e2d5a" transparent opacity={0.6} />
+        <lineBasicMaterial color="#1e2d5a" transparent opacity={0.5} />
       </lineSegments>
 
       {/* Buildings */}
@@ -309,7 +359,7 @@ function AgentSystem() {
 
   useEffect(() => {
     const { params } = useEpidemicStore.getState();
-    agentsRef.current = createAgents(params.population, params.vacRate);
+    agentsRef.current = createAgents(params.population, params.vacRate, params.contagion);
     tickRef.current = 0;
     frameRef.current = 0;
     wavesRef.current.forEach((w) => { w.active = false; });
@@ -348,14 +398,14 @@ function AgentSystem() {
       return;
     }
 
-    const dt = Math.min(delta, 0.05);
+    const dt = Math.min(delta * store.simSpeed, 0.08);
     const { counts, transmissions } = stepAgents(
       agentsRef.current, tickRef.current, store.params, dt,
     );
     tickRef.current++;
     frameRef.current++;
 
-    if (counts.I === 0 && tickRef.current > 30) {
+    if (counts.I === 0 && tickRef.current > TICKS_PER_DAY) {
       store.pause();
     }
 
@@ -380,19 +430,19 @@ function AgentSystem() {
       const sx = a.x - 30;
       const sz = a.y - 30;
 
-      // Agent sphere (radius 1.0)
+      // Agent sphere (small dot with glow)
       dummy.rotation.set(0, 0, 0);
       dummy.scale.setScalar(1);
-      dummy.position.set(sx, 1.0, sz);
+      dummy.position.set(sx, 0.45, sz);
       dummy.updateMatrix();
       agentMeshRef.current.setMatrixAt(i, dummy.matrix);
       col.setRGB(a.r, a.g, a.b);
       agentMeshRef.current.setColorAt(i, col);
 
       // Halo — breathing animation
-      const breathScale = 1 + 0.12 * Math.sin(t * 2.5 + i * 0.41);
+      const breathScale = 1 + 0.15 * Math.sin(t * 2.5 + i * 0.41);
       dummy.scale.setScalar(breathScale);
-      dummy.position.set(sx, 1.0, sz);
+      dummy.position.set(sx, 0.45, sz);
       dummy.updateMatrix();
       haloMeshRef.current.setMatrixAt(i, dummy.matrix);
       haloMeshRef.current.setColorAt(i, col);
@@ -440,7 +490,7 @@ function AgentSystem() {
     const flashPos: number[] = [];
     for (const f of flashRef.current) {
       if (!f.active) continue;
-      f.life -= delta * 3.5;
+      f.life -= delta * 1.8;
       if (f.life <= 0) { f.active = false; continue; }
       flashPos.push(f.x1, 1.2, f.y1, f.x2, 1.2, f.y2);
     }
@@ -463,7 +513,7 @@ function AgentSystem() {
       if (frameRef.current % 30 === 0) {
         store.pushHistory({
           tick: tickRef.current,
-          day: Math.floor(tickRef.current / 30),
+          day: Math.floor(tickRef.current / TICKS_PER_DAY),
           ...counts,
         });
       }
@@ -495,16 +545,16 @@ function AgentSystem() {
 
   return (
     <>
-      {/* Agent spheres */}
+      {/* Agent spheres — small dots */}
       <instancedMesh ref={agentMeshRef} args={[undefined, undefined, MAX_POP]}>
-        <sphereGeometry args={[1.0, 12, 10]} />
-        <meshStandardMaterial roughness={0.25} metalness={0.1} />
+        <sphereGeometry args={[0.38, 10, 8]} />
+        <meshStandardMaterial roughness={0.1} metalness={0.0} emissiveIntensity={3.0} />
       </instancedMesh>
 
-      {/* Halo glow (additive) */}
+      {/* Halo glow (additive) — subtle, tight */}
       <instancedMesh ref={haloMeshRef} args={[undefined, undefined, MAX_POP]}>
-        <sphereGeometry args={[1.6, 10, 8]} />
-        <meshBasicMaterial transparent opacity={0.12} depthWrite={false} blending={THREE.AdditiveBlending} />
+        <sphereGeometry args={[0.65, 8, 6]} />
+        <meshBasicMaterial transparent opacity={0.18} depthWrite={false} blending={THREE.AdditiveBlending} />
       </instancedMesh>
 
       {/* Infection radius rings */}
@@ -535,7 +585,7 @@ function AgentSystem() {
       {/* Flash transmission lines */}
       <lineSegments>
         <bufferGeometry ref={flashGeomRef} />
-        <lineBasicMaterial color={0xff6688} transparent opacity={0.85} />
+        <lineBasicMaterial color={0xff2255} transparent opacity={1.0} blending={THREE.AdditiveBlending} />
       </lineSegments>
 
       {/* Heatmap overlay */}
@@ -586,7 +636,7 @@ function SceneContent() {
       <AgentSystem />
 
       <EffectComposer>
-        <Bloom intensity={1.4} luminanceThreshold={0.28} luminanceSmoothing={0.8} mipmapBlur />
+        <Bloom intensity={2.2} luminanceThreshold={0.1} luminanceSmoothing={0.75} mipmapBlur />
       </EffectComposer>
     </>
   );

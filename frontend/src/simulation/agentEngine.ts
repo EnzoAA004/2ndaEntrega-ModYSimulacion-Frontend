@@ -1,5 +1,7 @@
 export const WORLD_SIZE = 60;
-export const MAX_POP = 600;
+export const MAX_POP = 800;
+// 1 game-day = 90 ticks → at 60fps with simSpeed=1 that's 1.5 real seconds per day
+export const TICKS_PER_DAY = 90;
 
 export type AgentState = 'S' | 'I' | 'R' | 'V';
 
@@ -15,6 +17,7 @@ export interface Agent {
   homeX: number; homeY: number;
   workX: number; workY: number;
   socialGroup: number;
+  district: number; // 0=centro, 1=norte, 2=sur
 }
 
 export const STATE_COLOR: Record<AgentState, [number, number, number]> = {
@@ -31,24 +34,47 @@ export interface SimParams {
   vacRate: number;
   recoveryDays: number;
   population: number;
+  // Fun params
+  mutationRate: number;   // 0-1: virus mutates each tick → increases contagion slowly
+  hospitalLevel: number;  // 0-1: reduces recovery time up to 50%
+  quarantine: number;     // 0-1: hard lockdown — reduces mobility dramatically
+  temperature: number;    // -1(winter) to 1(summer): affects contagion
 }
 
 export interface StepResult {
   counts: Record<AgentState, number>;
   transmissions: Array<[number, number, number, number]>;
   newInfections: number;
+  currentContagion: number;
 }
 
-export function createAgents(population: number, vacRate: number): Agent[] {
+// 3 districts with clear separation
+// District 0 (Centro): agent coords ~25-35, 25-35  → 3D ~-5..+5, -5..+5
+// District 1 (Norte):  agent coords ~10-50, 5-15   → 3D ~-20..+20, -25..-15
+// District 2 (Sur):    agent coords ~10-50, 45-55  → 3D ~-20..+20, +15..+25
+const DISTRICT_CENTERS: Array<[number, number]> = [
+  [30, 30], // Centro
+  [30, 10], // Norte
+  [30, 50], // Sur
+];
+
+const GROUP_TO_DISTRICT = [0, 0, 1, 1, 2, 2];
+
+// Agent mutation state (module-level mutable, reset each call to createAgents)
+let _currentContagion = 0.55;
+
+export function createAgents(population: number, vacRate: number, baseContagion: number): Agent[] {
+  _currentContagion = baseContagion;
   const n = Math.min(population, MAX_POP);
   return Array.from({ length: n }, (_, i) => {
     const state: AgentState = i === 0 ? 'I' : Math.random() < vacRate ? 'V' : 'S';
     const [r, g, b] = STATE_COLOR[state];
     const socialGroup = Math.floor(Math.random() * 6);
-    const groupCenterX = 10 + (socialGroup % 3) * 20;
-    const groupCenterY = 10 + Math.floor(socialGroup / 3) * 20;
-    const homeX = Math.max(2, Math.min(WORLD_SIZE - 2, groupCenterX + (Math.random() - 0.5) * 12));
-    const homeY = Math.max(2, Math.min(WORLD_SIZE - 2, groupCenterY + (Math.random() - 0.5) * 12));
+    const district = GROUP_TO_DISTRICT[socialGroup];
+    const [dcx, dcy] = DISTRICT_CENTERS[district];
+    // Spread within district
+    const homeX = Math.max(2, Math.min(WORLD_SIZE - 2, dcx + (Math.random() - 0.5) * 18));
+    const homeY = Math.max(2, Math.min(WORLD_SIZE - 2, dcy + (Math.random() - 0.5) * 10));
     return {
       x: homeX + (Math.random() - 0.5) * 4,
       y: homeY + (Math.random() - 0.5) * 4,
@@ -64,6 +90,7 @@ export function createAgents(population: number, vacRate: number): Agent[] {
       workX: Math.random() * (WORLD_SIZE - 4) + 2,
       workY: Math.random() * (WORLD_SIZE - 4) + 2,
       socialGroup,
+      district,
     };
   });
 }
@@ -73,10 +100,26 @@ const GW = Math.ceil(WORLD_SIZE / CELL);
 
 export function stepAgents(agents: Agent[], tick: number, params: SimParams, dt: number): StepResult {
   const BASE_SPEED = 0.13;
-  const effectiveBeta = params.contagion * (1 - params.maskUsage * 0.65) * dt * 55;
-  const infectRadius = 2.4 * (1 - params.distancing * 0.6);
-  const recoveryTicks = params.recoveryDays * 30;
 
+  // Mutation: contagion slowly drifts up
+  if (params.mutationRate > 0 && tick > 0 && tick % 10 === 0) {
+    _currentContagion = Math.min(1, _currentContagion + params.mutationRate * 0.003);
+  }
+
+  // Temperature effect: winter → more contagion, summer → less
+  const tempFactor = 1 - params.temperature * 0.25;
+
+  // Hospital: reduces recovery time
+  const recoveryTicks = params.recoveryDays * TICKS_PER_DAY * (1 - params.hospitalLevel * 0.5);
+
+  // Quarantine: drastically reduces mobility
+  const mobilityMultiplier = 1 - params.quarantine * 0.85;
+
+  // ~0.4% infection chance per tick per contact at default params — gives R₀≈2 at contagion=0.55
+  const effectiveBeta = _currentContagion * (1 - params.maskUsage * 0.65) * tempFactor * dt * 0.35;
+  const infectRadius = 2.0 * (1 - params.distancing * 0.6);
+
+  // Spatial grid
   const grid: number[][] = Array.from({ length: GW * GW }, () => []);
   for (let i = 0; i < agents.length; i++) {
     const a = agents[i];
@@ -85,15 +128,16 @@ export function stepAgents(agents: Agent[], tick: number, params: SimParams, dt:
     grid[cy * GW + cx].push(i);
   }
 
+  // Move agents
   for (const a of agents) {
-    const gx = 10 + (a.socialGroup % 3) * 20;
-    const gy = 10 + Math.floor(a.socialGroup / 3) * 20;
-    a.vx += (gx - a.x) * 0.0004 + (Math.random() - 0.5) * 0.1;
-    a.vy += (gy - a.y) * 0.0004 + (Math.random() - 0.5) * 0.1;
+    const [dcx, dcy] = DISTRICT_CENTERS[a.district];
+    // Attraction toward district center (weaker than before to allow inter-district spread)
+    a.vx += (dcx - a.x) * 0.0003 + (Math.random() - 0.5) * 0.1;
+    a.vy += (dcy - a.y) * 0.0003 + (Math.random() - 0.5) * 0.1;
 
     const spd = Math.sqrt(a.vx * a.vx + a.vy * a.vy);
-    const maxSpd = BASE_SPEED * a.mobility * (1 - params.distancing * 0.55);
-    if (spd > maxSpd) { a.vx = (a.vx / spd) * maxSpd; a.vy = (a.vy / spd) * maxSpd; }
+    const maxSpd = BASE_SPEED * a.mobility * (1 - params.distancing * 0.55) * mobilityMultiplier;
+    if (spd > maxSpd && maxSpd > 0) { a.vx = (a.vx / spd) * maxSpd; a.vy = (a.vy / spd) * maxSpd; }
 
     a.vx *= 0.97; a.vy *= 0.97;
     a.x += a.vx; a.y += a.vy;
@@ -104,6 +148,7 @@ export function stepAgents(agents: Agent[], tick: number, params: SimParams, dt:
     if (a.y > WORLD_SIZE - 1) { a.y = WORLD_SIZE - 1; a.vy = -Math.abs(a.vy); }
   }
 
+  // Infection
   const toInfect: number[] = [];
   const transmissions: Array<[number, number, number, number]> = [];
 
@@ -124,7 +169,7 @@ export function stepAgents(agents: Agent[], tick: number, params: SimParams, dt:
             const maskFactor = (a.maskUsage ? 0.4 : 1) * (b.maskUsage ? 0.5 : 1);
             if (Math.random() < effectiveBeta * maskFactor) {
               toInfect.push(j);
-              if (transmissions.length < 8) transmissions.push([a.x, a.y, b.x, b.y]);
+              if (transmissions.length < 10) transmissions.push([a.x, a.y, b.x, b.y]);
             }
           }
         }
@@ -143,6 +188,7 @@ export function stepAgents(agents: Agent[], tick: number, params: SimParams, dt:
     }
   }
 
+  // Recovery
   for (const a of agents) {
     if (a.state === 'I' && tick - a.infectedTick > recoveryTicks) {
       a.state = 'R';
@@ -154,9 +200,10 @@ export function stepAgents(agents: Agent[], tick: number, params: SimParams, dt:
   const counts: Record<AgentState, number> = { S: 0, I: 0, R: 0, V: 0 };
   for (const a of agents) counts[a.state]++;
 
-  return { counts, transmissions, newInfections };
+  return { counts, transmissions, newInfections, currentContagion: _currentContagion };
 }
 
 export function computeR0(params: SimParams): number {
-  return Math.max(0, params.contagion * (1 - params.maskUsage * 0.65) * (1 - params.distancing * 0.6) * 3.8);
+  const tempFactor = 1 - params.temperature * 0.25;
+  return Math.max(0, params.contagion * (1 - params.maskUsage * 0.65) * (1 - params.distancing * 0.6) * tempFactor * 3.8);
 }

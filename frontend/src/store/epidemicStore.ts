@@ -17,8 +17,10 @@ interface EpidemicStore {
   history: HistoryPoint[];
   resetSignal: number;
   eventSignal: EventSignal;
+  simSpeed: number; // 0.2 (slow) → 1.0 (normal) → 4.0 (fast)
 
   setParam: (key: keyof SimParams, value: number) => void;
+  setSimSpeed: (v: number) => void;
   play: () => void;
   pause: () => void;
   reset: () => void;
@@ -34,17 +36,22 @@ const DEFAULT_PARAMS: SimParams = {
   distancing: 0.0,
   vacRate: 0.0,
   recoveryDays: 14,
-  population: 250,
+  population: 300,
+  mutationRate: 0.0,
+  hospitalLevel: 0.0,
+  quarantine: 0.0,
+  temperature: 0.0,
 };
 
 export const useEpidemicStore = create<EpidemicStore>((set, get) => ({
   params: DEFAULT_PARAMS,
   isPlaying: true,
   tick: 0,
-  counts: { S: 249, I: 1, R: 0, V: 0 },
+  counts: { S: 299, I: 1, R: 0, V: 0 },
   history: [],
   resetSignal: 0,
   eventSignal: null,
+  simSpeed: 1.0,
 
   setParam: (key, value) => {
     set((s) => ({ params: { ...s.params, [key]: value } }));
@@ -52,6 +59,8 @@ export const useEpidemicStore = create<EpidemicStore>((set, get) => ({
       set((s) => ({ resetSignal: s.resetSignal + 1, history: [], tick: 0 }));
     }
   },
+
+  setSimSpeed: (v) => set({ simSpeed: v }),
 
   play: () => set({ isPlaying: true }),
   pause: () => set({ isPlaying: false }),

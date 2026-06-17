@@ -4,13 +4,14 @@ import { ControlPanel } from '../components/epidemic/ControlPanel';
 import { EpidemicCurves } from '../components/epidemic/EpidemicCurves';
 import { NarrativeBox } from '../components/epidemic/NarrativeBox';
 import { useEpidemicStore } from '../store/epidemicStore';
+import { TICKS_PER_DAY } from '../simulation/agentEngine';
 
 function EndOverlay() {
   const counts = useEpidemicStore((s) => s.counts);
   const tick = useEpidemicStore((s) => s.tick);
   const reset = useEpidemicStore((s) => s.reset);
-  const day = Math.floor(tick / 30);
-  if (counts.I > 0 || tick < 30) return null;
+  const day = Math.floor(tick / TICKS_PER_DAY);
+  if (counts.I > 0 || tick < TICKS_PER_DAY) return null;
 
   return (
     <div
