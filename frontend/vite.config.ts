@@ -3,4 +3,16 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          three: ["three"],
+          r3f: ["@react-three/fiber", "@react-three/drei", "@react-three/postprocessing", "postprocessing"],
+          vendor: ["react", "react-dom", "react-router-dom"],
+          charts: ["recharts"],
+        },
+      },
+    },
+  },
 });
