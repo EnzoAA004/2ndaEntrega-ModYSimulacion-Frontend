@@ -1,239 +1,165 @@
-import { useState, useEffect } from 'react';
 import { useEpidemicStore } from '../../store/epidemicStore';
 import type { SimParams } from '../../simulation/agentEngine';
 
-// ── Presets ──────────────────────────────────────────────────────────
-const PRESETS: Array<{ label: string; params: Partial<SimParams> }> = [
-  {
-    label: '🟢 Control',
-    params: { contagion: 0.20, maskUsage: 0.60, distancing: 0.50, vacRate: 0.40, recoveryDays: 10, population: 250 },
-  },
-  {
-    label: '🟡 Endémico',
-    params: { contagion: 0.45, maskUsage: 0.20, distancing: 0.10, vacRate: 0.10, recoveryDays: 14, population: 250 },
-  },
-  {
-    label: '🔴 Epidemia',
-    params: { contagion: 0.75, maskUsage: 0.00, distancing: 0.00, vacRate: 0.00, recoveryDays: 14, population: 250 },
-  },
-  {
-    label: '🔥 Variante',
-    params: { contagion: 0.92, maskUsage: 0.00, distancing: 0.00, vacRate: 0.00, recoveryDays: 21, population: 300 },
-  },
-  {
-    label: '💉 Vacunación',
-    params: { contagion: 0.55, maskUsage: 0.30, distancing: 0.20, vacRate: 0.70, recoveryDays: 12, population: 300 },
-  },
-  {
-    label: '🌧 Invernal',
-    params: { contagion: 0.68, maskUsage: 0.10, distancing: 0.00, vacRate: 0.05, recoveryDays: 18, population: 250 },
-  },
+interface PresetDef {
+  label: string;
+  emoji: string;
+  params: Partial<SimParams>;
+}
+
+const PRESETS: PresetDef[] = [
+  { label: 'Control', emoji: '🟢', params: { contagion: 0.2, maskUsage: 0.7, distancing: 0.7, vacRate: 0.3 } },
+  { label: 'Endémico', emoji: '🟡', params: { contagion: 0.45, maskUsage: 0.3, distancing: 0.2, vacRate: 0.1 } },
+  { label: 'Epidemia', emoji: '🔴', params: { contagion: 0.75, maskUsage: 0.0, distancing: 0.0, vacRate: 0.0 } },
+  { label: 'Variante', emoji: '🔥', params: { contagion: 0.92, maskUsage: 0.0, distancing: 0.0, vacRate: 0.0 } },
+  { label: 'Vacunación', emoji: '💉', params: { contagion: 0.55, maskUsage: 0.4, distancing: 0.1, vacRate: 0.6 } },
+  { label: 'Invernal', emoji: '🌧', params: { contagion: 0.65, maskUsage: 0.1, distancing: 0.0, vacRate: 0.05 } },
 ];
 
-// ── Slider ────────────────────────────────────────────────────────────
-interface SliderProps {
-  emoji: string;
+interface SliderDef {
+  key: keyof SimParams;
   label: string;
-  hint: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  format: (v: number) => string;
+  emoji: string;
+  min: number; max: number; step: number;
   color: string;
-  onChange: (v: number) => void;
-  onRelease?: (v: number) => void;
+  hint: string;
+  format: (v: number) => string;
 }
 
-function Slider({ emoji, label, hint, value, min, max, step, format, color, onChange, onRelease }: SliderProps) {
-  const pct = ((value - min) / (max - min)) * 100;
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-slate-300 flex items-center gap-1.5">
-          <span>{emoji}</span>
-          <span className="font-medium">{label}</span>
-        </span>
-        <span className="text-xs font-mono font-bold tabular-nums" style={{ color }}>
-          {format(value)}
-        </span>
-      </div>
-      <div className="relative h-1.5 rounded-full bg-slate-700/60">
-        <div
-          className="absolute left-0 top-0 h-full rounded-full transition-none"
-          style={{ width: `${pct}%`, background: color, opacity: 0.7 }}
-        />
-        <input
-          type="range"
-          min={min} max={max} step={step} value={value}
-          onChange={(e) => onChange(Number(e.target.value))}
-          onPointerUp={onRelease ? (e) => onRelease(Number((e.target as HTMLInputElement).value)) : undefined}
-          className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
-          style={{ zIndex: 1 }}
-        />
-        <div
-          className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full shadow-lg pointer-events-none"
-          style={{ left: `calc(${pct}% - 6px)`, background: color, boxShadow: `0 0 6px ${color}` }}
-        />
-      </div>
-      <div className="text-[10px] text-slate-600">{hint}</div>
-    </div>
-  );
-}
+const SLIDERS: SliderDef[] = [
+  { key: 'contagion', label: 'Contagiosidad', emoji: '🦠', min: 0.05, max: 1, step: 0.01, color: '#ef4444', hint: 'Probabilidad de transmisión por contacto', format: (v) => `${(v * 100).toFixed(0)}%` },
+  { key: 'maskUsage', label: 'Uso de barbijo', emoji: '😷', min: 0, max: 1, step: 0.01, color: '#3b82f6', hint: 'Reduce el contagio hasta un 65%', format: (v) => `${(v * 100).toFixed(0)}%` },
+  { key: 'distancing', label: 'Distanciamiento', emoji: '🤝', min: 0, max: 1, step: 0.01, color: '#22c55e', hint: 'Reduce velocidad y radio de infección', format: (v) => `${(v * 100).toFixed(0)}%` },
+  { key: 'vacRate', label: 'Vacunación', emoji: '💉', min: 0, max: 0.9, step: 0.01, color: '#a855f7', hint: 'Porcentaje de la población inmune', format: (v) => `${(v * 100).toFixed(0)}%` },
+  { key: 'recoveryDays', label: 'Días de recuperación', emoji: '🏥', min: 3, max: 30, step: 1, color: '#f59e0b', hint: 'Tiempo hasta recuperación', format: (v) => `${v}d` },
+  { key: 'population', label: 'Población', emoji: '👥', min: 50, max: 500, step: 10, color: '#64748b', hint: 'Número de agentes en la ciudad', format: (v) => `${v}` },
+];
 
-// ── Panel ─────────────────────────────────────────────────────────────
 export function ControlPanel() {
-  const { params, isPlaying, setParam, play, pause, reset, applyPreset } = useEpidemicStore();
-
-  // Local state for reset-triggering sliders (avoid resetting while dragging)
-  const [localPop, setLocalPop] = useState(params.population);
-  const [localVac, setLocalVac] = useState(params.vacRate);
-
-  useEffect(() => setLocalPop(params.population), [params.population]);
-  useEffect(() => setLocalVac(params.vacRate), [params.vacRate]);
-
-  const dynamicHint = (() => {
-    if (params.maskUsage > 0.4 && params.distancing > 0.3)
-      return { icon: '✅', color: '#22c55e', text: 'Barbijo + distanciamiento activos. Gran efecto en la curva.' };
-    if (params.contagion > 0.7)
-      return { icon: '⚠️', color: '#ef4444', text: 'Alto riesgo. El virus se propaga muy fácilmente.' };
-    if (localVac > 0.5)
-      return { icon: '💉', color: '#3b82f6', text: 'Alta vacunación. La epidemia debería desaparecer.' };
-    return { icon: '💡', color: '#64748b', text: 'Mové los controles para ver el impacto en tiempo real.' };
-  })();
+  const { params, setParam, play, pause, reset, isPlaying, applyPreset, triggerEvent } = useEpidemicStore();
 
   return (
-    <aside
-      className="flex w-[270px] shrink-0 flex-col overflow-y-auto border-r"
-      style={{ background: '#0b1629', borderColor: 'rgba(255,255,255,0.06)' }}
+    <div
+      className="flex flex-col gap-4 p-4 overflow-y-auto flex-shrink-0"
+      style={{
+        width: 270,
+        background: 'rgba(8,14,31,0.9)',
+        backdropFilter: 'blur(12px)',
+        borderRight: '1px solid rgba(255,255,255,0.08)',
+        color: 'white',
+      }}
     >
       {/* Presets */}
-      <div className="p-3 border-b" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
-        <p className="text-[9px] uppercase tracking-widest text-slate-500 font-semibold mb-2">
-          Escenarios rápidos
-        </p>
-        <div className="grid grid-cols-2 gap-1.5">
+      <div>
+        <p className="text-[11px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">Escenarios</p>
+        <div className="grid grid-cols-3 gap-1.5">
           {PRESETS.map((p) => (
             <button
               key={p.label}
               onClick={() => applyPreset(p.params)}
-              className="text-left px-2.5 py-2 rounded-lg text-[11px] font-medium leading-tight text-slate-300 transition-all"
-              style={{
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.07)',
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.09)';
-                (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.18)';
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)';
-                (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.07)';
-              }}
+              className="rounded-lg px-1 py-2 text-[11px] font-bold border border-white/10 transition-all hover:border-white/25 hover:scale-105 active:scale-95"
+              style={{ background: 'rgba(255,255,255,0.04)' }}
             >
-              {p.label}
+              <div>{p.emoji}</div>
+              <div className="text-slate-300 mt-0.5">{p.label}</div>
             </button>
           ))}
         </div>
       </div>
 
+      <div className="border-t border-white/8" />
+
       {/* Sliders */}
-      <div className="p-3 space-y-5 flex-1 border-b" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
-        <p className="text-[9px] uppercase tracking-widest text-slate-500 font-semibold">
-          Controles de la epidemia
-        </p>
-
-        <Slider
-          emoji="🦠" label="Facilidad de contagio"
-          hint="Qué tan fácil se transmite el virus"
-          value={params.contagion} min={0.05} max={1.0} step={0.01}
-          format={(v) => `${Math.round(v * 100)}%`}
-          color="#ef4444"
-          onChange={(v) => setParam('contagion', v)}
-        />
-
-        <Slider
-          emoji="😷" label="Uso de barbijo"
-          hint="Reduce la transmisión hasta un 70%"
-          value={params.maskUsage} min={0} max={1} step={0.01}
-          format={(v) => `${Math.round(v * 100)}%`}
-          color="#06b6d4"
-          onChange={(v) => setParam('maskUsage', v)}
-        />
-
-        <Slider
-          emoji="🤝" label="Distanciamiento social"
-          hint="Las personas mantienen mayor separación"
-          value={params.distancing} min={0} max={1} step={0.01}
-          format={(v) => `${Math.round(v * 100)}%`}
-          color="#22c55e"
-          onChange={(v) => setParam('distancing', v)}
-        />
-
-        <Slider
-          emoji="⚡" label="Días para recuperarse"
-          hint="Cuánto tiempo dura la infección"
-          value={params.recoveryDays} min={3} max={30} step={1}
-          format={(v) => `${v} días`}
-          color="#f59e0b"
-          onChange={(v) => setParam('recoveryDays', v)}
-        />
-
-        <Slider
-          emoji="💉" label="Vacunación inicial"
-          hint="Personas ya vacunadas al inicio (suelta para reiniciar)"
-          value={localVac} min={0} max={0.9} step={0.01}
-          format={(v) => `${Math.round(v * 100)}%`}
-          color="#3b82f6"
-          onChange={setLocalVac}
-          onRelease={(v) => setParam('vacRate', v)}
-        />
-
-        <Slider
-          emoji="👥" label="Tamaño de la ciudad"
-          hint="Cantidad de personas (suelta para reiniciar)"
-          value={localPop} min={50} max={400} step={10}
-          format={(v) => `${Math.round(v)} personas`}
-          color="#a855f7"
-          onChange={setLocalPop}
-          onRelease={(v) => setParam('population', v)}
-        />
+      <div className="space-y-4">
+        {SLIDERS.map((s) => (
+          <div key={s.key} className="space-y-1">
+            <div className="flex justify-between items-center">
+              <label className="text-sm font-medium flex items-center gap-1.5 text-slate-200">
+                <span>{s.emoji}</span> {s.label}
+              </label>
+              <span className="text-xs font-mono text-slate-400">{s.format(params[s.key] as number)}</span>
+            </div>
+            <input
+              type="range"
+              min={s.min}
+              max={s.max}
+              step={s.step}
+              value={params[s.key] as number}
+              onChange={(e) => setParam(s.key, parseFloat(e.target.value))}
+              className="w-full h-2 rounded-full appearance-none cursor-pointer"
+              style={{ accentColor: s.color }}
+            />
+            <p className="text-[10px] text-slate-600">{s.hint}</p>
+          </div>
+        ))}
       </div>
 
-      {/* Playback */}
-      <div className="p-3 flex gap-2 border-b" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+      <div className="border-t border-white/8" />
+
+      {/* Random events */}
+      <div>
+        <p className="text-[11px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">⚡ Eventos aleatorios</p>
+        <div className="flex flex-col gap-1.5">
+          <button
+            onClick={() => triggerEvent('festival')}
+            className="rounded-lg px-3 py-2 text-xs font-semibold border border-orange-500/30 text-orange-300 hover:bg-orange-500/10 transition"
+            style={{ background: 'rgba(249,115,22,0.07)' }}
+          >
+            🎉 Festival — +25% contagio por 8s
+          </button>
+          <button
+            onClick={() => triggerEvent('traveler')}
+            className="rounded-lg px-3 py-2 text-xs font-semibold border border-red-500/30 text-red-300 hover:bg-red-500/10 transition"
+            style={{ background: 'rgba(239,68,68,0.07)' }}
+          >
+            ✈️ Viajero infectado — inyecta 3 casos
+          </button>
+          <button
+            onClick={() => triggerEvent('campaign')}
+            className="rounded-lg px-3 py-2 text-xs font-semibold border border-purple-500/30 text-purple-300 hover:bg-purple-500/10 transition"
+            style={{ background: 'rgba(168,85,247,0.07)' }}
+          >
+            💉 Campaña de vacunación — +30% vacunados
+          </button>
+        </div>
+      </div>
+
+      <div className="border-t border-white/8" />
+
+      {/* Play / Pause / Reset */}
+      <div className="flex gap-2">
         <button
-          onClick={isPlaying ? pause : play}
-          className="flex-1 py-2 rounded-lg text-sm font-bold transition-all"
-          style={{ background: isPlaying ? '#ef4444' : '#22c55e', color: '#000' }}
+          onClick={() => (isPlaying ? pause() : play())}
+          className="flex-1 py-2.5 rounded-xl font-bold text-sm transition-all hover:scale-105 active:scale-95"
+          style={{
+            background: isPlaying ? 'rgba(239,68,68,0.2)' : 'rgba(34,197,94,0.2)',
+            border: `1px solid ${isPlaying ? '#ef444466' : '#22c55e66'}`,
+            color: isPlaying ? '#ef4444' : '#22c55e',
+          }}
         >
-          {isPlaying ? '⏸ Pausar' : '▶ Continuar'}
+          {isPlaying ? '⏸ Pausar' : '▶ Reanudar'}
         </button>
         <button
           onClick={reset}
-          className="px-4 py-2 rounded-lg text-sm font-semibold text-slate-400 transition-all"
-          style={{ border: '1px solid rgba(255,255,255,0.1)' }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.06)'; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+          className="flex-1 py-2.5 rounded-xl font-bold text-sm transition-all hover:scale-105 active:scale-95 border border-white/15 text-slate-300"
+          style={{ background: 'rgba(255,255,255,0.05)' }}
         >
-          ↺ Reset
+          🔄 Reiniciar
         </button>
       </div>
 
-      {/* Dynamic hint */}
-      <div className="p-3">
+      {/* Active interventions */}
+      {(params.maskUsage > 0 || params.distancing > 0 || params.vacRate > 0) && (
         <div
-          className="rounded-xl p-3 text-xs leading-relaxed"
-          style={{
-            background: `${dynamicHint.color}0d`,
-            border: `1px solid ${dynamicHint.color}25`,
-            borderLeft: `3px solid ${dynamicHint.color}`,
-          }}
+          className="rounded-xl p-3 text-[11px] space-y-1"
+          style={{ background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.2)' }}
         >
-          <span className="mr-1">{dynamicHint.icon}</span>
-          <span className="text-slate-300">{dynamicHint.text}</span>
+          <p className="text-green-400 font-semibold uppercase tracking-wide">✅ Intervenciones activas</p>
+          {params.maskUsage > 0 && <p className="text-slate-400">😷 Barbijo: {(params.maskUsage * 100).toFixed(0)}%</p>}
+          {params.distancing > 0 && <p className="text-slate-400">🤝 Distanciamiento: {(params.distancing * 100).toFixed(0)}%</p>}
+          {params.vacRate > 0 && <p className="text-slate-400">💉 Vacunados: {(params.vacRate * 100).toFixed(0)}%</p>}
         </div>
-      </div>
-    </aside>
+      )}
+    </div>
   );
 }

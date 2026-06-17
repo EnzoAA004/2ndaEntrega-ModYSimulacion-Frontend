@@ -1,5 +1,5 @@
 export const WORLD_SIZE = 60;
-export const MAX_POP = 400;
+export const MAX_POP = 600;
 
 export type AgentState = 'S' | 'I' | 'R' | 'V';
 
@@ -9,19 +9,20 @@ export interface Agent {
   state: AgentState;
   infectedTick: number;
   r: number; g: number; b: number;
+  age: number;
+  maskUsage: boolean;
+  mobility: number;
+  homeX: number; homeY: number;
+  workX: number; workY: number;
+  socialGroup: number;
 }
 
 export const STATE_COLOR: Record<AgentState, [number, number, number]> = {
-  S: [0.133, 0.773, 0.369],  // #22c55e green
-  I: [0.937, 0.267, 0.267],  // #ef4444 red
-  R: [0.957, 0.620, 0.043],  // #f59e0b amber
-  V: [0.231, 0.510, 0.965],  // #3b82f6 blue
+  S: [0.133, 0.773, 0.369],
+  I: [0.937, 0.267, 0.267],
+  R: [0.957, 0.620, 0.043],
+  V: [0.231, 0.510, 0.965],
 };
-
-export interface StepResult {
-  counts: Record<AgentState, number>;
-  transmissions: Array<[number, number, number, number]>;
-}
 
 export interface SimParams {
   contagion: number;
@@ -32,88 +33,70 @@ export interface SimParams {
   population: number;
 }
 
+export interface StepResult {
+  counts: Record<AgentState, number>;
+  transmissions: Array<[number, number, number, number]>;
+  newInfections: number;
+}
+
 export function createAgents(population: number, vacRate: number): Agent[] {
-  const count = Math.min(Math.round(population), MAX_POP);
-  const agents: Agent[] = [];
-
-  for (let i = 0; i < count; i++) {
-    let state: AgentState;
-    if (i === 0) {
-      state = 'I';
-    } else if (Math.random() < vacRate) {
-      state = 'V';
-    } else {
-      state = 'S';
-    }
-
+  const n = Math.min(population, MAX_POP);
+  return Array.from({ length: n }, (_, i) => {
+    const state: AgentState = i === 0 ? 'I' : Math.random() < vacRate ? 'V' : 'S';
     const [r, g, b] = STATE_COLOR[state];
-    agents.push({
-      x: 2 + Math.random() * (WORLD_SIZE - 4),
-      y: 2 + Math.random() * (WORLD_SIZE - 4),
-      vx: (Math.random() - 0.5) * 0.08,
-      vy: (Math.random() - 0.5) * 0.08,
+    const socialGroup = Math.floor(Math.random() * 6);
+    const groupCenterX = 10 + (socialGroup % 3) * 20;
+    const groupCenterY = 10 + Math.floor(socialGroup / 3) * 20;
+    const homeX = Math.max(2, Math.min(WORLD_SIZE - 2, groupCenterX + (Math.random() - 0.5) * 12));
+    const homeY = Math.max(2, Math.min(WORLD_SIZE - 2, groupCenterY + (Math.random() - 0.5) * 12));
+    return {
+      x: homeX + (Math.random() - 0.5) * 4,
+      y: homeY + (Math.random() - 0.5) * 4,
+      vx: (Math.random() - 0.5) * 0.15,
+      vy: (Math.random() - 0.5) * 0.15,
       state,
       infectedTick: state === 'I' ? 0 : -1,
       r, g, b,
-    });
-  }
-
-  return agents;
+      age: Math.floor(Math.random() * 70) + 10,
+      maskUsage: Math.random() < 0.2,
+      mobility: 0.6 + Math.random() * 0.9,
+      homeX, homeY,
+      workX: Math.random() * (WORLD_SIZE - 4) + 2,
+      workY: Math.random() * (WORLD_SIZE - 4) + 2,
+      socialGroup,
+    };
+  });
 }
 
-export function stepAgents(
-  agents: Agent[],
-  tick: number,
-  params: SimParams,
-  dt: number,
-): StepResult {
-  const frameScale = dt * 60;
-  const baseSpeed = 0.10 * (1 - params.distancing * 0.55) * frameScale;
+const CELL = 5;
+const GW = Math.ceil(WORLD_SIZE / CELL);
+
+export function stepAgents(agents: Agent[], tick: number, params: SimParams, dt: number): StepResult {
+  const BASE_SPEED = 0.13;
+  const effectiveBeta = params.contagion * (1 - params.maskUsage * 0.65) * dt * 55;
   const infectRadius = 2.4 * (1 - params.distancing * 0.6);
-  const infectR2 = infectRadius * infectRadius;
-  const effectiveBeta = params.contagion * (1 - params.maskUsage * 0.7) * frameScale;
-  const recoveryTicks = Math.round(params.recoveryDays * 30);
+  const recoveryTicks = params.recoveryDays * 30;
 
-  // ── Move ──────────────────────────────────────────────────────────
+  const grid: number[][] = Array.from({ length: GW * GW }, () => []);
+  for (let i = 0; i < agents.length; i++) {
+    const a = agents[i];
+    const cx = Math.min(GW - 1, Math.max(0, Math.floor(a.x / CELL)));
+    const cy = Math.min(GW - 1, Math.max(0, Math.floor(a.y / CELL)));
+    grid[cy * GW + cx].push(i);
+  }
+
   for (const a of agents) {
-    a.vx += (Math.random() - 0.5) * 0.03 * frameScale;
-    a.vy += (Math.random() - 0.5) * 0.03 * frameScale;
-
-    // Social distancing repulsion
-    if (params.distancing > 0.05) {
-      const repelR = 2.8 * params.distancing;
-      const repelR2 = repelR * repelR;
-      for (const b of agents) {
-        if (a === b) continue;
-        const dx = a.x - b.x;
-        if (Math.abs(dx) > repelR) continue;
-        const dy = a.y - b.y;
-        if (Math.abs(dy) > repelR) continue;
-        const d2 = dx * dx + dy * dy;
-        if (d2 < repelR2 && d2 > 0.001) {
-          const d = Math.sqrt(d2);
-          const f = (repelR - d) / repelR * 0.015 * frameScale;
-          a.vx += (dx / d) * f;
-          a.vy += (dy / d) * f;
-        }
-      }
-    }
-
-    a.vx *= 0.92;
-    a.vy *= 0.92;
+    const gx = 10 + (a.socialGroup % 3) * 20;
+    const gy = 10 + Math.floor(a.socialGroup / 3) * 20;
+    a.vx += (gx - a.x) * 0.0004 + (Math.random() - 0.5) * 0.1;
+    a.vy += (gy - a.y) * 0.0004 + (Math.random() - 0.5) * 0.1;
 
     const spd = Math.sqrt(a.vx * a.vx + a.vy * a.vy);
-    if (spd > baseSpeed && spd > 0) {
-      a.vx = (a.vx / spd) * baseSpeed;
-      a.vy = (a.vy / spd) * baseSpeed;
-    }
-    if (spd < 0.001) {
-      a.vx = (Math.random() - 0.5) * 0.02;
-      a.vy = (Math.random() - 0.5) * 0.02;
-    }
+    const maxSpd = BASE_SPEED * a.mobility * (1 - params.distancing * 0.55);
+    if (spd > maxSpd) { a.vx = (a.vx / spd) * maxSpd; a.vy = (a.vy / spd) * maxSpd; }
 
-    a.x += a.vx;
-    a.y += a.vy;
+    a.vx *= 0.97; a.vy *= 0.97;
+    a.x += a.vx; a.y += a.vy;
 
     if (a.x < 1) { a.x = 1; a.vx = Math.abs(a.vx); }
     if (a.x > WORLD_SIZE - 1) { a.x = WORLD_SIZE - 1; a.vx = -Math.abs(a.vx); }
@@ -121,44 +104,59 @@ export function stepAgents(
     if (a.y > WORLD_SIZE - 1) { a.y = WORLD_SIZE - 1; a.vy = -Math.abs(a.vy); }
   }
 
-  // ── Infect ────────────────────────────────────────────────────────
+  const toInfect: number[] = [];
   const transmissions: Array<[number, number, number, number]> = [];
-  const toInfect = new Set<Agent>();
 
-  for (const infector of agents) {
-    if (infector.state !== 'I') continue;
-    for (const target of agents) {
-      if (target.state !== 'S' || toInfect.has(target)) continue;
-      const dx = infector.x - target.x;
-      if (Math.abs(dx) > infectRadius) continue;
-      const dy = infector.y - target.y;
-      if (Math.abs(dy) > infectRadius) continue;
-      if (dx * dx + dy * dy < infectR2 && Math.random() < effectiveBeta) {
-        toInfect.add(target);
-        if (transmissions.length < 20) {
-          transmissions.push([infector.x, infector.y, target.x, target.y]);
+  for (const a of agents) {
+    if (a.state !== 'I') continue;
+    const cx = Math.min(GW - 1, Math.max(0, Math.floor(a.x / CELL)));
+    const cy = Math.min(GW - 1, Math.max(0, Math.floor(a.y / CELL)));
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || nx >= GW || ny < 0 || ny >= GW) continue;
+        for (const j of grid[ny * GW + nx]) {
+          const b = agents[j];
+          if (b.state !== 'S') continue;
+          const ddx = b.x - a.x, ddy = b.y - a.y;
+          const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+          if (dist < infectRadius && dist > 0) {
+            const maskFactor = (a.maskUsage ? 0.4 : 1) * (b.maskUsage ? 0.5 : 1);
+            if (Math.random() < effectiveBeta * maskFactor) {
+              toInfect.push(j);
+              if (transmissions.length < 8) transmissions.push([a.x, a.y, b.x, b.y]);
+            }
+          }
         }
       }
     }
   }
 
-  for (const a of toInfect) {
-    a.state = 'I';
-    a.infectedTick = tick;
-    [a.r, a.g, a.b] = STATE_COLOR['I'];
-  }
-
-  // ── Recover ───────────────────────────────────────────────────────
-  for (const a of agents) {
-    if (a.state === 'I' && tick - a.infectedTick >= recoveryTicks) {
-      a.state = 'R';
-      [a.r, a.g, a.b] = STATE_COLOR['R'];
+  let newInfections = 0;
+  for (const idx of toInfect) {
+    if (agents[idx].state === 'S') {
+      agents[idx].state = 'I';
+      agents[idx].infectedTick = tick;
+      const [r, g, b] = STATE_COLOR.I;
+      agents[idx].r = r; agents[idx].g = g; agents[idx].b = b;
+      newInfections++;
     }
   }
 
-  // ── Count ─────────────────────────────────────────────────────────
+  for (const a of agents) {
+    if (a.state === 'I' && tick - a.infectedTick > recoveryTicks) {
+      a.state = 'R';
+      const [r, g, b2] = STATE_COLOR.R;
+      a.r = r; a.g = g; a.b = b2;
+    }
+  }
+
   const counts: Record<AgentState, number> = { S: 0, I: 0, R: 0, V: 0 };
   for (const a of agents) counts[a.state]++;
 
-  return { counts, transmissions };
+  return { counts, transmissions, newInfections };
+}
+
+export function computeR0(params: SimParams): number {
+  return Math.max(0, params.contagion * (1 - params.maskUsage * 0.65) * (1 - params.distancing * 0.6) * 3.8);
 }

@@ -1,37 +1,116 @@
 import { useRef, useEffect, useMemo } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Stars } from '@react-three/drei';
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { useEpidemicStore } from '../../store/epidemicStore';
-import { createAgents, stepAgents, WORLD_SIZE, MAX_POP } from '../../simulation/agentEngine';
+import { createAgents, stepAgents, WORLD_SIZE, MAX_POP, STATE_COLOR } from '../../simulation/agentEngine';
 import type { Agent } from '../../simulation/agentEngine';
 
-// ── Static city ────────────────────────────────────────────────────
+// ── Heatmap ─────────────────────────────────────────────────────────
 
-const BUILDING_DATA = [
-  { x: -22, z: -22, w: 5, d: 4, h: 5.5 }, { x: -13, z: -22, w: 4, d: 5, h: 3.5 },
-  { x: 7, z: -22, w: 3, d: 3, h: 6.0 },  { x: 16, z: -22, w: 5, d: 4, h: 4.0 },
-  { x: 24, z: -22, w: 4, d: 4, h: 7.0 }, { x: -22, z: -13, w: 4, d: 5, h: 4.0 },
-  { x: 14, z: -13, w: 5, d: 4, h: 5.0 }, { x: 24, z: -13, w: 3, d: 3, h: 3.5 },
-  { x: -22, z: 8,  w: 4, d: 4, h: 3.0 }, { x: -14, z: 8,  w: 5, d: 3, h: 6.5 },
-  { x: 16, z: 8,  w: 4, d: 5, h: 4.5 },  { x: 24, z: 8,  w: 3, d: 4, h: 5.0 },
-  { x: -22, z: 17, w: 5, d: 4, h: 4.0 }, { x: -13, z: 17, w: 3, d: 5, h: 3.0 },
-  { x: 8, z: 17,  w: 4, d: 3, h: 5.5 },  { x: 24, z: 17, w: 4, d: 4, h: 4.0 },
-  { x: -22, z: 24, w: 4, d: 3, h: 6.0 }, { x: 8, z: 24,  w: 5, d: 4, h: 3.5 },
-  { x: 17, z: 24, w: 4, d: 4, h: 5.0 },  { x: 25, z: 24, w: 3, d: 5, h: 7.5 },
+let _hmCanvas: HTMLCanvasElement | null = null;
+let _hmCtx: CanvasRenderingContext2D | null = null;
+
+function getHMCtx() {
+  if (!_hmCanvas) {
+    _hmCanvas = document.createElement('canvas');
+    _hmCanvas.width = 128;
+    _hmCanvas.height = 128;
+    _hmCtx = _hmCanvas.getContext('2d');
+  }
+  return { canvas: _hmCanvas!, ctx: _hmCtx! };
+}
+
+function updateHeatmap(agents: Agent[], texture: THREE.CanvasTexture) {
+  const { ctx } = getHMCtx();
+  const W = 128;
+  const density = new Float32Array(W * W);
+
+  for (const a of agents) {
+    if (a.state !== 'I') continue;
+    const px = Math.floor((a.x / WORLD_SIZE) * W);
+    const py = Math.floor((a.y / WORLD_SIZE) * W);
+    const R = 10;
+    for (let dy = -R; dy <= R; dy++) {
+      for (let dx = -R; dx <= R; dx++) {
+        const nx = px + dx, ny = py + dy;
+        if (nx < 0 || nx >= W || ny < 0 || ny >= W) continue;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        density[ny * W + nx] += Math.exp((-d * d) / 20);
+      }
+    }
+  }
+
+  let maxD = 0.001;
+  for (let i = 0; i < density.length; i++) if (density[i] > maxD) maxD = density[i];
+
+  const imgData = ctx.createImageData(W, W);
+  const data = imgData.data;
+  for (let i = 0; i < W * W; i++) {
+    const t = Math.min(1, density[i] / maxD);
+    const idx = i * 4;
+    if (t < 0.001) { data[idx + 3] = 0; continue; }
+    if (t < 0.33) {
+      const s = t / 0.33;
+      data[idx] = 0; data[idx + 1] = Math.floor(100 + s * 100); data[idx + 2] = Math.floor(200 - s * 50);
+    } else if (t < 0.66) {
+      const s = (t - 0.33) / 0.33;
+      data[idx] = Math.floor(s * 255); data[idx + 1] = 200; data[idx + 2] = 0;
+    } else {
+      const s = (t - 0.66) / 0.34;
+      data[idx] = 255; data[idx + 1] = Math.floor(200 * (1 - s)); data[idx + 2] = 0;
+    }
+    data[idx + 3] = Math.floor(t * 180);
+  }
+  ctx.putImageData(imgData, 0, 0);
+  texture.needsUpdate = true;
+}
+
+// ── City ─────────────────────────────────────────────────────────────
+
+interface BuildingDef { x: number; z: number; w: number; d: number; h: number; color: string; emissive?: string }
+
+const BUILDINGS: BuildingDef[] = [
+  // Residential
+  { x: -22, z: -22, w: 5, d: 4, h: 4.0, color: '#1e2d4a' },
+  { x: -13, z: -22, w: 4, d: 5, h: 3.0, color: '#162035' },
+  { x:   7, z: -22, w: 3, d: 3, h: 5.5, color: '#1a2840' },
+  { x:  16, z: -22, w: 5, d: 4, h: 3.5, color: '#1e2d4a' },
+  { x:  24, z: -22, w: 4, d: 4, h: 6.5, color: '#162035' },
+  { x: -22, z: -13, w: 4, d: 5, h: 3.5, color: '#1a2840' },
+  { x:  14, z: -13, w: 5, d: 4, h: 4.5, color: '#1e2d4a' },
+  { x:  24, z: -13, w: 3, d: 3, h: 3.0, color: '#162035' },
+  { x: -22, z:   8, w: 4, d: 4, h: 3.0, color: '#1a2840' },
+  { x: -14, z:   8, w: 5, d: 3, h: 5.5, color: '#1e2d4a' },
+  { x:  16, z:   8, w: 4, d: 5, h: 4.0, color: '#162035' },
+  { x:  24, z:   8, w: 3, d: 4, h: 4.5, color: '#1a2840' },
+  { x: -22, z:  17, w: 5, d: 4, h: 3.5, color: '#1e2d4a' },
+  { x: -13, z:  17, w: 3, d: 5, h: 2.8, color: '#162035' },
+  { x:   8, z:  17, w: 4, d: 3, h: 5.0, color: '#1a2840' },
+  { x:  24, z:  17, w: 4, d: 4, h: 3.5, color: '#1e2d4a' },
+  { x: -22, z:  24, w: 4, d: 3, h: 5.5, color: '#162035' },
+  { x:   8, z:  24, w: 5, d: 4, h: 3.0, color: '#1a2840' },
+  { x:  17, z:  24, w: 4, d: 4, h: 4.5, color: '#1e2d4a' },
+  { x:  25, z:  24, w: 3, d: 5, h: 7.0, color: '#162035' },
+  // Hospital (landmark)
+  { x: 18, z: -5, w: 7, d: 6, h: 5.0, color: '#1e3340', emissive: '#1e3340' },
+  // School
+  { x: -18, z: 5, w: 6, d: 5, h: 3.5, color: '#1e2a20', emissive: '#1e2a20' },
+  // Commercial tower
+  { x: 0, z: -20, w: 4, d: 4, h: 9.0, color: '#12182e' },
 ];
 
-const BUILDING_COLORS = [
-  '#1e2a4a', '#162038', '#202840', '#1c263c',
-  '#182038', '#1a2644', '#1d2f50', '#16203c',
-];
-
-const TREE_POSITIONS: Array<[number, number, number]> = [
-  [-8, 0, -8], [-4, 0, -7], [4, 0, -7], [7, 0, -4],
-  [7, 0, 4],  [4, 0, 7],  [-4, 0, 7],  [-7, 0, 4],
-  [-7, 0, -3], [-18, 0, 0], [18, 0, -5], [-3, 0, -20],
-  [12, 0, 20], [-20, 0, 15], [22, 0, 10],
+const TREE_POS: Array<[number, number, number]> = [
+  [-6, 0, -6], [-4, 0, -7], [4, 0, -7], [6, 0, -4],
+  [6, 0, 4],   [4, 0, 7],   [-4, 0, 7], [-6, 0, 4],
+  [-7, 0, 0],  [7, 0, 0],   [0, 0, -7], [0, 0, 7],
+  [-18, 0, 0], [18, 0, -5], [-3, 0, -20], [3, 0, -20],
+  [12, 0, 20], [-20, 0, 15], [22, 0, 10], [-24, 0, -5],
+  [24, 0, 5], [-10, 0, 24], [10, 0, -24], [-5, 0, 10],
+  [5, 0, -10], [15, 0, 0], [-15, 0, 0], [0, 0, 15],
+  [-24, 0, 20], [24, 0, -20],
 ];
 
 function TreeMesh({ position }: { position: [number, number, number] }) {
@@ -41,13 +120,28 @@ function TreeMesh({ position }: { position: [number, number, number] }) {
         <cylinderGeometry args={[0.12, 0.18, 1, 6]} />
         <meshStandardMaterial color="#4a3728" />
       </mesh>
-      <mesh position={[0, 1.8, 0]}>
-        <coneGeometry args={[0.75, 1.8, 6]} />
-        <meshStandardMaterial color="#1a5c1a" emissive="#0d3a0d" emissiveIntensity={0.15} />
+      <mesh position={[0, 1.9, 0]}>
+        <coneGeometry args={[0.8, 2.5, 7]} />
+        <meshStandardMaterial color="#1a5c1a" emissive="#0d3a0d" emissiveIntensity={0.3} />
       </mesh>
-      <mesh position={[0, 2.9, 0]}>
-        <coneGeometry args={[0.52, 1.4, 6]} />
-        <meshStandardMaterial color="#1e6b1e" emissive="#0d3a0d" emissiveIntensity={0.15} />
+      <mesh position={[0, 3.1, 0]}>
+        <coneGeometry args={[0.55, 1.6, 7]} />
+        <meshStandardMaterial color="#1e6b1e" emissive="#0d4a0d" emissiveIntensity={0.25} />
+      </mesh>
+    </group>
+  );
+}
+
+function HospitalCross({ x, z }: { x: number; z: number }) {
+  return (
+    <group position={[x, 5.4, z]}>
+      <mesh>
+        <boxGeometry args={[1.8, 0.18, 0.4]} />
+        <meshStandardMaterial color="#ff2244" emissive="#ff0022" emissiveIntensity={1.2} />
+      </mesh>
+      <mesh>
+        <boxGeometry args={[0.4, 0.18, 1.8]} />
+        <meshStandardMaterial color="#ff2244" emissive="#ff0022" emissiveIntensity={1.2} />
       </mesh>
     </group>
   );
@@ -67,84 +161,192 @@ function City() {
 
   return (
     <group>
-      {/* Ground */}
+      {/* Base ground */}
       <mesh rotation-x={-Math.PI / 2}>
         <planeGeometry args={[WORLD_SIZE, WORLD_SIZE]} />
-        <meshStandardMaterial color="#0e1525" />
+        <meshStandardMaterial color="#0d1523" />
       </mesh>
 
       {/* Central park */}
       <mesh rotation-x={-Math.PI / 2} position={[0, 0.01, 0]}>
-        <planeGeometry args={[14, 14]} />
-        <meshStandardMaterial color="#1a4a28" />
+        <planeGeometry args={[16, 16]} />
+        <meshStandardMaterial color="#1a3520" />
+      </mesh>
+
+      {/* Park inner grass */}
+      <mesh rotation-x={-Math.PI / 2} position={[0, 0.02, 0]}>
+        <planeGeometry args={[12, 12]} />
+        <meshStandardMaterial color="#1e4025" emissive="#0a2010" emissiveIntensity={0.3} />
       </mesh>
 
       {/* Street grid */}
       <lineSegments geometry={streetGeom}>
-        <lineBasicMaterial color="#1e2d5a" transparent opacity={0.75} />
+        <lineBasicMaterial color="#1e2d5a" transparent opacity={0.6} />
       </lineSegments>
 
       {/* Buildings */}
-      {BUILDING_DATA.map((b, i) => (
-        <mesh key={i} position={[b.x, b.h / 2, b.z]}>
-          <boxGeometry args={[b.w, b.h, b.d]} />
-          <meshStandardMaterial
-            color={BUILDING_COLORS[i % BUILDING_COLORS.length]}
-            emissive={BUILDING_COLORS[i % BUILDING_COLORS.length]}
-            emissiveIntensity={0.12}
-          />
-        </mesh>
+      {BUILDINGS.map((b, i) => (
+        <group key={i}>
+          <mesh position={[b.x, b.h / 2, b.z]}>
+            <boxGeometry args={[b.w, b.h, b.d]} />
+            <meshStandardMaterial
+              color={b.color}
+              emissive={b.emissive ?? b.color}
+              emissiveIntensity={0.2}
+            />
+          </mesh>
+          {/* Window glow */}
+          <mesh position={[b.x, b.h * 0.55, b.z + b.d / 2 + 0.02]}>
+            <planeGeometry args={[b.w * 0.75, b.h * 0.45]} />
+            <meshBasicMaterial color="#2a4a8a" transparent opacity={0.45} />
+          </mesh>
+        </group>
       ))}
 
-      {/* Building window glow strips */}
-      {BUILDING_DATA.map((b, i) => (
-        <mesh key={`win-${i}`} position={[b.x, b.h * 0.6, b.z + b.d / 2 + 0.01]}>
-          <planeGeometry args={[b.w * 0.7, b.h * 0.4]} />
-          <meshBasicMaterial color="#334477" transparent opacity={0.4} />
-        </mesh>
-      ))}
+      {/* Hospital cross sign */}
+      <HospitalCross x={18} z={-5} />
+      {/* Hospital glow */}
+      <pointLight position={[18, 4, -5]} intensity={2.5} distance={18} color="#ff3355" />
+
+      {/* School – yellow accent roof */}
+      <mesh position={[-18, 3.5 + 0.1, 5]}>
+        <boxGeometry args={[6, 0.15, 5]} />
+        <meshStandardMaterial color="#eecc22" emissive="#aaaa00" emissiveIntensity={0.8} />
+      </mesh>
 
       {/* Trees */}
-      {TREE_POSITIONS.map((pos, i) => (
+      {TREE_POS.map((pos, i) => (
         <TreeMesh key={i} position={pos} />
       ))}
     </group>
   );
 }
 
-// ── Agent system ───────────────────────────────────────────────────
+// ── Wave pool ────────────────────────────────────────────────────────
 
-const FLASH_POOL = 30;
+const WAVE_POOL = 24;
+const FLASH_POOL = 20;
 
+type WaveEntry = { active: boolean; life: number; x: number; z: number };
 type FlashEntry = { active: boolean; life: number; x1: number; y1: number; x2: number; y2: number };
 
+// ── Camera controller ─────────────────────────────────────────────
+
+function CameraController() {
+  const controlsRef = useRef<OrbitControlsImpl>(null!);
+  const targetRef = useRef(new THREE.Vector3(0, 0, 0));
+  const agentsSignal = useRef<Agent[]>([]);
+
+  // Expose to AgentSystem
+  (CameraController as unknown as { agentsRef: typeof agentsSignal }).agentsRef = agentsSignal;
+
+  useFrame(() => {
+    const agents = agentsSignal.current;
+    if (agents.length === 0) return;
+
+    const infected = agents.filter((a) => a.state === 'I');
+    if (infected.length > 0 && infected.length < agents.length * 0.35) {
+      const cx = infected.reduce((s, a) => s + (a.x - 30), 0) / infected.length;
+      const cz = infected.reduce((s, a) => s + (a.y - 30), 0) / infected.length;
+      targetRef.current.lerp(new THREE.Vector3(cx * 0.25, 0, cz * 0.25), 0.006);
+    } else {
+      targetRef.current.lerp(new THREE.Vector3(0, 0, 0), 0.004);
+    }
+
+    if (controlsRef.current) {
+      controlsRef.current.target.lerp(targetRef.current, 0.012);
+    }
+  });
+
+  return (
+    <OrbitControls
+      ref={controlsRef}
+      makeDefault
+      target={[0, 0, 0]}
+      minDistance={18}
+      maxDistance={90}
+      maxPolarAngle={Math.PI / 2.1}
+      enablePan
+      autoRotate
+      autoRotateSpeed={0.18}
+    />
+  );
+}
+
+// ── Agent system ──────────────────────────────────────────────────
+
 function AgentSystem() {
-  const meshRef = useRef<THREE.InstancedMesh>(null!);
-  const auraRef = useRef<THREE.InstancedMesh>(null!);
+  const agentMeshRef = useRef<THREE.InstancedMesh>(null!);
+  const haloMeshRef = useRef<THREE.InstancedMesh>(null!);
+  const infectRingRef = useRef<THREE.InstancedMesh>(null!);
+  const waveMeshRef = useRef<THREE.InstancedMesh>(null!);
   const flashGeomRef = useRef<THREE.BufferGeometry>(null!);
+  const heatTexRef = useRef<THREE.CanvasTexture | null>(null);
+
   const dummy = useMemo(() => new THREE.Object3D(), []);
+  const col = useMemo(() => new THREE.Color(), []);
   const agentsRef = useRef<Agent[]>([]);
   const tickRef = useRef(0);
   const frameRef = useRef(0);
+
+  const wavesRef = useRef<WaveEntry[]>(
+    Array.from({ length: WAVE_POOL }, () => ({ active: false, life: 0, x: 0, z: 0 })),
+  );
   const flashRef = useRef<FlashEntry[]>(
-    Array.from({ length: FLASH_POOL }, () => ({
-      active: false, life: 0, x1: 0, y1: 0, x2: 0, y2: 0,
-    })),
+    Array.from({ length: FLASH_POOL }, () => ({ active: false, life: 0, x1: 0, y1: 0, x2: 0, y2: 0 })),
   );
 
   const resetSignal = useEpidemicStore((s) => s.resetSignal);
+  const eventSignal = useEpidemicStore((s) => s.eventSignal);
+
+  // Create heatmap texture once
+  const heatmapTexture = useMemo(() => {
+    const { canvas } = getHMCtx();
+    const tex = new THREE.CanvasTexture(canvas);
+    heatTexRef.current = tex;
+    return tex;
+  }, []);
 
   useEffect(() => {
     const { params } = useEpidemicStore.getState();
     agentsRef.current = createAgents(params.population, params.vacRate);
     tickRef.current = 0;
     frameRef.current = 0;
+    wavesRef.current.forEach((w) => { w.active = false; });
     flashRef.current.forEach((f) => { f.active = false; });
   }, [resetSignal]);
 
-  useFrame((_, delta) => {
+  // Handle traveler event: inject 3 infected agents in random far spots
+  useEffect(() => {
+    if (!eventSignal || eventSignal.type !== 'traveler') return;
+    const agents = agentsRef.current;
+    let injected = 0;
+    for (let i = agents.length - 1; i >= 0 && injected < 3; i--) {
+      if (agents[i].state === 'S') {
+        agents[i].state = 'I';
+        agents[i].infectedTick = tickRef.current;
+        const [r, g, b] = STATE_COLOR.I;
+        agents[i].r = r; agents[i].g = g; agents[i].b = b;
+        // Move to a random far location
+        agents[i].x = 2 + Math.random() * (WORLD_SIZE - 4);
+        agents[i].y = 2 + Math.random() * (WORLD_SIZE - 4);
+        injected++;
+      }
+    }
+  }, [eventSignal]);
+
+  const { size } = useThree();
+  void size; // suppress unused warning
+
+  useFrame(({ clock }, delta) => {
     const store = useEpidemicStore.getState();
-    if (!store.isPlaying || agentsRef.current.length === 0) return;
+    const t = clock.getElapsedTime();
+
+    if (!store.isPlaying || agentsRef.current.length === 0) {
+      // Still animate waves when paused
+      animateWaves(delta);
+      return;
+    }
 
     const dt = Math.min(delta, 0.05);
     const { counts, transmissions } = stepAgents(
@@ -153,88 +355,109 @@ function AgentSystem() {
     tickRef.current++;
     frameRef.current++;
 
-    // Spawn transmission flashes
-    for (const [x1, y1, x2, y2] of transmissions.slice(0, 6)) {
-      const slot = flashRef.current.find((f) => !f.active);
-      if (slot) {
-        slot.active = true; slot.life = 1.0;
-        slot.x1 = x1 - 30; slot.y1 = y1 - 30;
-        slot.x2 = x2 - 30; slot.y2 = y2 - 30;
-      }
+    if (counts.I === 0 && tickRef.current > 30) {
+      store.pause();
     }
 
-    // Update InstancedMesh
-    const col = new THREE.Color();
+    const R0 = store.params.contagion * (1 - store.params.maskUsage * 0.65) * (1 - store.params.distancing * 0.6) * 3.8;
+    const ringColor = R0 > 2 ? 0xef4444 : R0 > 1 ? 0xeab308 : 0x22c55e;
+
+    // Update agent instances
     for (let i = 0; i < MAX_POP; i++) {
       const a = agentsRef.current[i];
 
       if (!a) {
-        dummy.rotation.set(0, 0, 0);
         dummy.scale.setScalar(0);
         dummy.position.set(0, -200, 0);
+        dummy.rotation.set(0, 0, 0);
         dummy.updateMatrix();
-        meshRef.current.setMatrixAt(i, dummy.matrix);
-        auraRef.current.setMatrixAt(i, dummy.matrix);
+        agentMeshRef.current.setMatrixAt(i, dummy.matrix);
+        haloMeshRef.current.setMatrixAt(i, dummy.matrix);
+        infectRingRef.current.setMatrixAt(i, dummy.matrix);
         continue;
       }
 
       const sx = a.x - 30;
       const sz = a.y - 30;
 
-      // Agent sphere
+      // Agent sphere (radius 1.0)
       dummy.rotation.set(0, 0, 0);
       dummy.scale.setScalar(1);
-      dummy.position.set(sx, 0.45, sz);
+      dummy.position.set(sx, 1.0, sz);
       dummy.updateMatrix();
-      meshRef.current.setMatrixAt(i, dummy.matrix);
+      agentMeshRef.current.setMatrixAt(i, dummy.matrix);
       col.setRGB(a.r, a.g, a.b);
-      meshRef.current.setColorAt(i, col);
+      agentMeshRef.current.setColorAt(i, col);
 
-      // Aura ring (infected only)
+      // Halo — breathing animation
+      const breathScale = 1 + 0.12 * Math.sin(t * 2.5 + i * 0.41);
+      dummy.scale.setScalar(breathScale);
+      dummy.position.set(sx, 1.0, sz);
+      dummy.updateMatrix();
+      haloMeshRef.current.setMatrixAt(i, dummy.matrix);
+      haloMeshRef.current.setColorAt(i, col);
+
+      // Infection radius ring (only infected)
       if (a.state === 'I') {
-        const pulse = 1 + 0.22 * Math.sin(Date.now() * 0.003 + i * 0.7);
+        const pulse = 1 + 0.08 * Math.sin(t * 3.2 + i * 0.6);
+        dummy.scale.set(pulse, 1, pulse);
         dummy.rotation.set(-Math.PI / 2, 0, 0);
-        dummy.scale.setScalar(pulse);
-        dummy.position.set(sx, 0.03, sz);
+        dummy.position.set(sx, 0.05, sz);
         dummy.updateMatrix();
-        auraRef.current.setMatrixAt(i, dummy.matrix);
+        infectRingRef.current.setMatrixAt(i, dummy.matrix);
+        void ringColor;
       } else {
-        dummy.rotation.set(0, 0, 0);
         dummy.scale.setScalar(0);
         dummy.position.set(0, -200, 0);
+        dummy.rotation.set(0, 0, 0);
         dummy.updateMatrix();
-        auraRef.current.setMatrixAt(i, dummy.matrix);
+        infectRingRef.current.setMatrixAt(i, dummy.matrix);
       }
     }
 
-    meshRef.current.instanceMatrix.needsUpdate = true;
-    if (meshRef.current.instanceColor) meshRef.current.instanceColor.needsUpdate = true;
-    auraRef.current.instanceMatrix.needsUpdate = true;
+    agentMeshRef.current.instanceMatrix.needsUpdate = true;
+    if (agentMeshRef.current.instanceColor) agentMeshRef.current.instanceColor.needsUpdate = true;
+    haloMeshRef.current.instanceMatrix.needsUpdate = true;
+    if (haloMeshRef.current.instanceColor) haloMeshRef.current.instanceColor.needsUpdate = true;
+    infectRingRef.current.instanceMatrix.needsUpdate = true;
 
-    // Update flash lines
+    // Spawn transmission waves + flash lines
+    for (const [x1, y1, x2, y2] of transmissions.slice(0, 6)) {
+      const mx = (x1 + x2) / 2 - 30, mz = (y1 + y2) / 2 - 30;
+      const wslot = wavesRef.current.find((w) => !w.active);
+      if (wslot) { wslot.active = true; wslot.life = 1.0; wslot.x = mx; wslot.z = mz; }
+      const fslot = flashRef.current.find((f) => !f.active);
+      if (fslot) {
+        fslot.active = true; fslot.life = 1.0;
+        fslot.x1 = x1 - 30; fslot.y1 = y1 - 30;
+        fslot.x2 = x2 - 30; fslot.y2 = y2 - 30;
+      }
+    }
+
+    animateWaves(delta);
+
+    // Flash lines
     const flashPos: number[] = [];
     for (const f of flashRef.current) {
       if (!f.active) continue;
       f.life -= delta * 3.5;
       if (f.life <= 0) { f.active = false; continue; }
-      flashPos.push(f.x1, 0.65, f.y1, f.x2, 0.65, f.y2);
+      flashPos.push(f.x1, 1.2, f.y1, f.x2, 1.2, f.y2);
     }
     if (flashGeomRef.current) {
       const arr = flashPos.length ? flashPos : [0, 0, 0, 0, 0.001, 0];
-      flashGeomRef.current.setAttribute(
-        'position', new THREE.Float32BufferAttribute(arr, 3),
-      );
-      flashGeomRef.current.setDrawRange(0, flashPos.length / 3);
+      flashGeomRef.current.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+      flashGeomRef.current.setDrawRange(0, Math.floor(flashPos.length / 3));
       const posAttr = flashGeomRef.current.getAttribute('position');
       if (posAttr) posAttr.needsUpdate = true;
     }
 
-    // Auto-pause when epidemic ends (no more infected)
-    if (counts.I === 0 && tickRef.current > 30) {
-      store.pause();
+    // Heatmap
+    if (frameRef.current % 20 === 0 && heatTexRef.current) {
+      updateHeatmap(agentsRef.current, heatTexRef.current);
     }
 
-    // Sync React state every 10 frames
+    // Sync React state
     if (frameRef.current % 10 === 0) {
       store.updateCounts(counts, tickRef.current);
       if (frameRef.current % 30 === 0) {
@@ -247,28 +470,84 @@ function AgentSystem() {
     }
   });
 
+  function animateWaves(delta: number) {
+    for (let i = 0; i < WAVE_POOL; i++) {
+      const w = wavesRef.current[i];
+      if (!w.active) {
+        dummy.scale.setScalar(0);
+        dummy.position.set(0, -200, 0);
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        waveMeshRef.current.setMatrixAt(i, dummy.matrix);
+        continue;
+      }
+      w.life -= delta * 2.2;
+      if (w.life <= 0) { w.active = false; continue; }
+      const radius = (1 - w.life) * 7 + 0.5;
+      dummy.scale.set(radius, 1, radius);
+      dummy.rotation.set(-Math.PI / 2, 0, 0);
+      dummy.position.set(w.x, 0.08, w.z);
+      dummy.updateMatrix();
+      waveMeshRef.current.setMatrixAt(i, dummy.matrix);
+    }
+    waveMeshRef.current.instanceMatrix.needsUpdate = true;
+  }
+
   return (
     <>
-      <instancedMesh ref={meshRef} args={[undefined, undefined, MAX_POP]}>
-        <sphereGeometry args={[0.44, 10, 8]} />
-        <meshStandardMaterial roughness={0.2} metalness={0.1} />
+      {/* Agent spheres */}
+      <instancedMesh ref={agentMeshRef} args={[undefined, undefined, MAX_POP]}>
+        <sphereGeometry args={[1.0, 12, 10]} />
+        <meshStandardMaterial roughness={0.25} metalness={0.1} />
       </instancedMesh>
 
-      <instancedMesh ref={auraRef} args={[undefined, undefined, MAX_POP]}>
-        <ringGeometry args={[1.5, 2.0, 24]} />
+      {/* Halo glow (additive) */}
+      <instancedMesh ref={haloMeshRef} args={[undefined, undefined, MAX_POP]}>
+        <sphereGeometry args={[1.6, 10, 8]} />
+        <meshBasicMaterial transparent opacity={0.12} depthWrite={false} blending={THREE.AdditiveBlending} />
+      </instancedMesh>
+
+      {/* Infection radius rings */}
+      <instancedMesh ref={infectRingRef} args={[undefined, undefined, MAX_POP]}>
+        <ringGeometry args={[2.0, 2.6, 32]} />
         <meshBasicMaterial
-          color={0xff3344}
+          color={0xef4444}
           transparent
-          opacity={0.38}
+          opacity={0.15}
           side={THREE.DoubleSide}
           depthWrite={false}
         />
       </instancedMesh>
 
+      {/* Transmission wave rings */}
+      <instancedMesh ref={waveMeshRef} args={[undefined, undefined, WAVE_POOL]}>
+        <ringGeometry args={[0.3, 0.65, 24]} />
+        <meshBasicMaterial
+          color={0xff3366}
+          transparent
+          opacity={0.55}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </instancedMesh>
+
+      {/* Flash transmission lines */}
       <lineSegments>
         <bufferGeometry ref={flashGeomRef} />
-        <lineBasicMaterial color={0xff88aa} transparent opacity={0.9} />
+        <lineBasicMaterial color={0xff6688} transparent opacity={0.85} />
       </lineSegments>
+
+      {/* Heatmap overlay */}
+      <mesh rotation-x={-Math.PI / 2} position={[0, 0.03, 0]}>
+        <planeGeometry args={[WORLD_SIZE, WORLD_SIZE]} />
+        <meshBasicMaterial
+          map={heatmapTexture}
+          transparent
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
     </>
   );
 }
@@ -278,30 +557,36 @@ function AgentSystem() {
 function SceneContent() {
   return (
     <>
-      <color attach="background" args={['#0d1117']} />
-      <ambientLight intensity={0.45} />
-      <directionalLight position={[20, 40, 20]} intensity={0.9} />
-      <pointLight position={[0, 15, 0]} intensity={0.5} color="#5577ff" distance={55} />
-      <pointLight position={[0, 5, 0]} intensity={0.2} color="#ffffff" distance={25} />
+      <color attach="background" args={['#080e1f']} />
 
-      <Stars radius={80} depth={30} count={1200} factor={3} saturation={0.3} fade speed={0.25} />
+      <ambientLight intensity={0.45} color="#aaccff" />
+      <directionalLight position={[30, 50, 30]} intensity={0.85} color="#ffffff" castShadow />
+      <directionalLight position={[-20, 30, -20]} intensity={0.3} color="#4466aa" />
 
-      <OrbitControls
-        makeDefault
-        target={[0, 0, 0]}
-        minDistance={18}
-        maxDistance={90}
-        maxPolarAngle={Math.PI / 2.1}
-        enablePan={false}
-        autoRotate
-        autoRotateSpeed={0.22}
-      />
+      {/* Street lights at intersections */}
+      {([-20, -10, 0, 10, 20] as number[]).flatMap((x) =>
+        ([-20, -10, 0, 10, 20] as number[]).map((z) => (
+          <pointLight
+            key={`sl-${x}-${z}`}
+            position={[x, 3, z]}
+            intensity={1.4}
+            distance={14}
+            color="#ffd580"
+            decay={2}
+          />
+        )),
+      )}
 
+      <pointLight position={[0, 4, 0]} intensity={2} distance={25} color="#55ff88" />
+
+      <Stars radius={80} depth={30} count={1500} factor={3} saturation={0.3} fade speed={0.2} />
+
+      <CameraController />
       <City />
       <AgentSystem />
 
       <EffectComposer>
-        <Bloom intensity={0.9} luminanceThreshold={0.55} luminanceSmoothing={0.9} mipmapBlur />
+        <Bloom intensity={1.4} luminanceThreshold={0.28} luminanceSmoothing={0.8} mipmapBlur />
       </EffectComposer>
     </>
   );
@@ -310,8 +595,9 @@ function SceneContent() {
 export function CityScene() {
   return (
     <Canvas
-      camera={{ position: [0, 55, 40], fov: 45 }}
-      gl={{ antialias: true }}
+      camera={{ position: [0, 58, 42], fov: 44 }}
+      shadows
+      gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
       style={{ width: '100%', height: '100%' }}
     >
       <SceneContent />

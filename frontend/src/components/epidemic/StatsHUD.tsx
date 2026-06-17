@@ -1,19 +1,52 @@
+import { useEffect, useRef, useState } from 'react';
 import { useEpidemicStore } from '../../store/epidemicStore';
+import { computeR0 } from '../../simulation/agentEngine';
 
-function StatChip({
-  emoji, label, value, color,
-}: { emoji: string; label: string; value: number; color: string }) {
+function AnimatedCount({ value, color }: { value: number; color: string }) {
+  const [displayed, setDisplayed] = useState(value);
+  const fromRef = useRef(value);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const from = fromRef.current;
+    const to = value;
+    if (from === to) return;
+    const start = performance.now();
+    const dur = 300;
+
+    function tick(now: number) {
+      const p = Math.min(1, (now - start) / dur);
+      setDisplayed(Math.round(from + (to - from) * p));
+      if (p < 1) { rafRef.current = requestAnimationFrame(tick); }
+      else { fromRef.current = to; }
+    }
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(tick);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [value]);
+
   return (
-    <div
-      className="flex items-center gap-2 px-3 py-1.5 rounded-lg"
-      style={{ background: `${color}12`, border: `1px solid ${color}30` }}
-    >
-      <span className="text-base leading-none">{emoji}</span>
+    <span className="text-xl font-bold font-mono" style={{ color }}>
+      {displayed.toLocaleString()}
+    </span>
+  );
+}
+
+interface StatChipProps {
+  emoji: string;
+  label: string;
+  value: number;
+  color: string;
+}
+
+function StatChip({ emoji, label, value, color }: StatChipProps) {
+  return (
+    <div className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 backdrop-blur-sm"
+      style={{ background: 'rgba(255,255,255,0.04)' }}>
+      <span className="text-xl">{emoji}</span>
       <div>
-        <div className="text-[9px] text-slate-500 leading-none uppercase tracking-wide">{label}</div>
-        <div className="text-sm font-black font-mono leading-tight tabular-nums" style={{ color }}>
-          {value.toLocaleString()}
-        </div>
+        <div className="text-[11px] text-slate-400 font-medium uppercase tracking-wide">{label}</div>
+        <AnimatedCount value={value} color={color} />
       </div>
     </div>
   );
@@ -21,58 +54,49 @@ function StatChip({
 
 export function StatsHUD() {
   const counts = useEpidemicStore((s) => s.counts);
-  const tick   = useEpidemicStore((s) => s.tick);
+  const tick = useEpidemicStore((s) => s.tick);
   const params = useEpidemicStore((s) => s.params);
-
   const day = Math.floor(tick / 30);
-  const R0 = params.contagion * (1 - params.maskUsage * 0.7) * (1 - params.distancing * 0.65) * 3.5;
-  const R0Color = R0 < 1 ? '#22c55e' : R0 < 2 ? '#f59e0b' : '#ef4444';
-  const R0Msg =
-    R0 < 0.5 ? 'La epidemia desaparece' :
-    R0 < 1   ? 'La epidemia baja sola' :
-    R0 < 1.5 ? `Cada infectado contagia a ~${R0.toFixed(1)} persona` :
-               `Cada infectado contagia a ~${R0.toFixed(1)} personas`;
+  const R0 = computeR0(params);
+  const r0Color = R0 > 2 ? '#ef4444' : R0 > 1 ? '#eab308' : '#22c55e';
 
   return (
     <div
-      className="flex items-center gap-3 px-4 py-2 border-b flex-shrink-0 flex-wrap"
-      style={{ background: 'rgba(11,22,41,0.97)', borderColor: 'rgba(255,255,255,0.07)' }}
+      className="flex items-center justify-between px-6 py-3 border-b border-white/10 flex-shrink-0"
+      style={{ background: 'rgba(8,14,31,0.85)', backdropFilter: 'blur(12px)' }}
     >
       {/* Day */}
-      <div className="flex items-center gap-2 shrink-0">
-        <span className="text-lg">📅</span>
-        <div>
-          <div className="text-[9px] text-slate-500 uppercase tracking-wide">Simulación</div>
-          <div className="text-sm font-bold font-mono text-white">Día {day}</div>
-        </div>
+      <div className="flex items-center gap-2">
+        <span className="text-slate-400 text-sm">📅</span>
+        <span className="font-mono text-2xl font-bold text-white">Día {day}</span>
       </div>
-
-      <div className="w-px h-8 bg-white/10 shrink-0" />
 
       {/* Stat chips */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <StatChip emoji="🟢" label="Sanos"        value={counts.S} color="#22c55e" />
-        <StatChip emoji="🔴" label="Infectados"   value={counts.I} color="#ef4444" />
-        <StatChip emoji="🔵" label="Vacunados"    value={counts.V} color="#3b82f6" />
-        <StatChip emoji="🟡" label="Recuperados"  value={counts.R} color="#f59e0b" />
+      <div className="flex items-center gap-3">
+        <StatChip emoji="😊" label="Susceptibles" value={counts.S} color="#22c55e" />
+        <StatChip emoji="🦠" label="Infectados" value={counts.I} color="#ef4444" />
+        <StatChip emoji="💪" label="Recuperados" value={counts.R} color="#f59e0b" />
+        <StatChip emoji="💉" label="Vacunados" value={counts.V} color="#3b82f6" />
       </div>
 
-      {/* R₀ */}
-      <div className="ml-auto flex items-center gap-3 shrink-0">
-        <div className="text-right hidden sm:block">
-          <div className="text-[9px] text-slate-500 uppercase tracking-wide">Número de reproducción</div>
-          <div className="text-xs text-slate-400">{R0Msg}</div>
-        </div>
+      {/* R₀ badge */}
+      <div className="text-right">
         <div
-          className="text-2xl font-black font-mono px-4 py-1.5 rounded-xl transition-all duration-700"
           style={{
-            color: R0Color,
-            background: `${R0Color}15`,
-            border: `2px solid ${R0Color}40`,
-            textShadow: `0 0 20px ${R0Color}80`,
+            color: r0Color,
+            textShadow: `0 0 18px ${r0Color}88`,
+            fontSize: '1.75rem',
+            fontWeight: 'bold',
+            fontFamily: 'monospace',
+            lineHeight: 1,
           }}
         >
           R₀ = {R0.toFixed(1)}
+        </div>
+        <div className="text-xs text-slate-400 mt-0.5 max-w-[180px] text-right">
+          {R0 > 1
+            ? `Cada infectado contagia a ~${R0.toFixed(1)} personas`
+            : 'La epidemia está desapareciendo'}
         </div>
       </div>
     </div>
