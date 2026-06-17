@@ -7,6 +7,7 @@ import { MeasurementsPage } from "./pages/MeasurementsPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { SimulationsPage } from "./pages/SimulationsPage";
 import { Simulation3DPage } from "./pages/Simulation3DPage";
+import { EpidemicPage } from "./pages/EpidemicPage";
 import { TheoryPage } from "./pages/TheoryPage";
 
 export default function App() {
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/dataset" element={<DatasetPage />} />
         <Route path="/simulations" element={<SimulationsPage />} />
         <Route path="/simulation-3d" element={<Simulation3DPage />} />
+        <Route path="/epidemic" element={<EpidemicPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/theory" element={<TheoryPage />} />
         <Route path="/about" element={<AboutPage />} />

@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { BarChart3, Box, Database, FileText, FlaskConical, Home, Info, Microscope } from "lucide-react";
+import { BarChart3, Box, Database, FileText, FlaskConical, Globe, Home, Info, Microscope } from "lucide-react";
 import { clsx } from "clsx";
 
 const links = [
@@ -8,6 +8,7 @@ const links = [
   { to: "/dataset", label: "Dataset", icon: Database },
   { to: "/simulations", label: "Simulaciones", icon: FlaskConical },
   { to: "/simulation-3d", label: "Simulación 3D", icon: Box },
+  { to: "/epidemic", label: "Ciudad Epidémica", icon: Globe },
   { to: "/reports", label: "Reportes", icon: FileText },
   { to: "/theory", label: "Marco teorico", icon: Microscope },
   { to: "/about", label: "Acerca", icon: Info },
